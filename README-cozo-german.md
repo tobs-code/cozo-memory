@@ -624,7 +624,7 @@ npx ts-node test-user-pref.ts
 
 ## Lizenz
 
-Dieses Projekt ist unter der MIT Lizenz lizenziert. Siehe die [LICENSE](LICENSE) Datei für Details.
+Dieses Projekt ist unter der Apache-2.0 Lizenz lizenziert. Siehe die [LICENSE](LICENSE) Datei für Details.
 
 ## Haftungsausschluss
 
