@@ -7,7 +7,6 @@ Ein lokales, Single-User Memory-System basierend auf CozoDB mit MCP (Model Conte
 Dieses Repository enthält:
 - einen MCP-Server (stdio) für Claude/andere MCP-Clients,
 - einen optionalen HTTP-API-Bridge-Server für UI/Tools,
-- eine optionale Web-UI (Vite/React)
 
 Wesentliche Eigenschaften:
 - **Hybride Suche (v0.7 Optimized)**: Kombination aus semantischer Suche (HNSW), **Full-Text Search (FTS)** und Graph-Signalen, zusammengeführt via Reciprocal Rank Fusion (RRF).
@@ -562,18 +561,6 @@ Ausgewählte Endpoints (Prefix `/api`):
 - `GET /health`
 - `GET /snapshots`, `POST /snapshots`
 
-### Web UI
-
-Im Ordner `web-ui/` liegt eine Vite/React UI. Standardablauf:
-
-```bash
-cd web-ui
-npm install
-npm run dev
-```
-
-Die UI erwartet aktuell eine API Bridge unter `http://localhost:3001/api` (fest im Code gesetzt).
-
 ## Entwicklung
 
 ### Struktur
@@ -620,7 +607,6 @@ npx ts-node test-user-pref.ts
 
 - Embedding-Model Download kann beim ersten Start lange dauern (Transformers lädt Artefakte).
 - Wenn `cleanup` verwendet wird, muss ein Ollama-Dienst lokal erreichbar sein und das gewünschte Modell vorhanden sein.
-- Wenn die Web-UI keine Daten zeigt: API Bridge läuft nicht, falscher Port oder CORS/Firewall blockiert.
 
 ## Lizenz
 
