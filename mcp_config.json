@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cozo-memory": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\tobs\\.cursor\\workspace\\m2\\dist\\index.js"
+      ]
+    }
+  }
+}
