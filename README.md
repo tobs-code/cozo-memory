@@ -72,4 +72,4 @@ npm run bridge
 
 ## License
 
-Apache License Version 2.0
+Apache-2.0
