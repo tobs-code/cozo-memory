@@ -72,4 +72,4 @@ npm run bridge
 
 ## License
 
-ISC
+Apache 2.0 Lizens
