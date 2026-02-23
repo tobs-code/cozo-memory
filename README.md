@@ -7,7 +7,7 @@ A local, single-user memory system based on CozoDB with MCP (Model Context Proto
 ## Quick Start
 
 ```bash
-git clone https://github.com/tobs-code/cozo-memory cozo-memory
+git clone https://github.com/tobs-code/cozo-memory
 cd cozo-memory
 npm install && npm run build
 npm run start
