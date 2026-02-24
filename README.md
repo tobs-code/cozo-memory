@@ -149,17 +149,9 @@ npm install
 npm run build
 ```
 
-### Windows Quickstart (incl. DirectML)
-
-```bash
-npm install
-npm run build
-npm run start
-```
-
 Notes:
 - On first start, `@xenova/transformers` downloads the embedding model (may take time).
-- The embedding backend tries to load in this order: `gpu` → `dml` (DirectML, Windows) → `cpu`. You can recognize the active path in the logs (`[EmbeddingService] ... DirectML ...`).
+- The embedding process runs on the CPU.
 
 ## Start / Integration
 
