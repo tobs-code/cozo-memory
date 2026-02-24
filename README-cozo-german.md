@@ -69,7 +69,7 @@ Der Kernvorteil ist **Retrieval-Qualität und Nachvollziehbarkeit**: Durch die K
 
 ## Performance & Benchmarks
 
-Benchmarks auf einem Standard-Entwickler-Laptop (Windows, Node.js 20+):
+Benchmarks auf einem Standard-Entwickler-Laptop (Windows, Node.js 20+, nur CPU):
 
 | Metrik | Wert | Anmerkung |
 | :--- | :--- | :--- |

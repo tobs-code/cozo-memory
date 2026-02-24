@@ -80,7 +80,7 @@ The core advantage is **Retrieval Quality and Traceability**: By combining graph
 
 ## Performance & Benchmarks
 
-Benchmarks on a standard developer laptop (Windows, Node.js 20+):
+Benchmarks on a standard developer laptop (Windows, Node.js 20+, CPU-only):
 
 | Metric | Value | Note |
 | :--- | :--- | :--- |
