@@ -1,4 +1,6 @@
-# CozoDB Memory MCP Server
+# CozoDB Memory MCP Server (Archiv/Referenz)
+
+> **Hinweis:** Dieses Repository wird primär auf Englisch gepflegt. Die deutsche Dokumentation dient nur noch als Referenz und wird nicht mehr aktiv aktualisiert. Alle System-Komponenten (FTS, Keywords, Logs) sind nun auf Englisch optimiert.
 
 Ein lokales, Single-User Memory-System basierend auf CozoDB mit MCP (Model Context Protocol) Integration. Fokus: robuste Speicherung, schnelle Hybrid-Suche (Vektor/Graph/Keyword), Time-Travel-Abfragen und wartungsfreundliche Konsolidierung.
 
@@ -10,7 +12,7 @@ Dieses Repository enthält:
 
 Wesentliche Eigenschaften:
 - **Hybride Suche (v0.7 Optimized)**: Kombination aus semantischer Suche (HNSW), **Full-Text Search (FTS)** und Graph-Signalen, zusammengeführt via Reciprocal Rank Fusion (RRF).
-- **Full-Text Search (FTS)**: Native CozoDB v0.7 FTS-Indizes mit deutschem Stemming, Stopword-Filterung und robustem Query-Sanitizing (Bereinigung von `+ - * / \ ( ) ? .`) für maximale Stabilität.
+- **Full-Text Search (FTS)**: Native CozoDB v0.7 FTS-Indizes mit **englischem** Stemming, Stopword-Filterung und robustem Query-Sanitizing (Bereinigung von `+ - * / \ ( ) ? .`) für maximale Stabilität.
 - **Near-Duplicate Detection (LSH)**: Erkennt automatisch sehr ähnliche Beobachtungen via MinHash-LSH (CozoDB v0.7), um Redundanz zu vermeiden.
 - **Recency Bias**: ältere Inhalte werden in der Fusion gedämpft (außer bei expliziter Keyword-Suche), damit „aktuell relevant“ häufiger oben landet.
 - **Graph-RAG & Graph-Walking (v1.7 Optimized)**: Erweitertes Retrieval-Verfahren, das semantische Vektor-Seeds mit rekursiven Graph-Traversals kombiniert. Nutzt nun einen optimierten **Graph-Walking** Algorithmus via Datalog, der HNSW-Index-Lookups für präzise Distanzberechnungen während der Traversierung verwendet.
@@ -528,7 +530,7 @@ Inference nutzt mehrere Strategien (nicht persistierend):
 - **Semantische Nähe**: ähnliche Entities via HNSW (`similar_to`, bis max. 0.9)
 - **Transitivität**: A→B und B→C (`potentially_related`, confidence 0.5)
 - **Expertise-Regel**: `Person` + `works_on` + `uses_tech` ⇒ `expert_in` (confidence 0.7)
-- **Query-Triggered Expertise**: Bei Suchanfragen mit Keywords wie `expert`, `skill`, `kenntnisse`, `kompetenz` etc. wird automatisch eine dedizierte Expertensuche über das Graph-Netzwerk gestartet.
+- **Query-Triggered Expertise**: Bei Suchanfragen mit Keywords wie `expert`, `skill`, `knowledge`, `competence` etc. wird automatisch eine dedizierte Expertensuche über das Graph-Netzwerk gestartet.
 
 ## Optional: HTTP API Bridge
 
