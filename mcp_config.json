@@ -3,7 +3,7 @@
     "cozo-memory": {
       "command": "node",
       "args": [
-        "C:\\path\\to\\cozo-memory\\dist\\index.js"
+        "C:\\Users\\tobs\\.cursor\\workspace\\cozo-memory\\dist\\index.js"
       ]
     }
   }

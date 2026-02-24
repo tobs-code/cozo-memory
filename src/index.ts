@@ -2247,18 +2247,18 @@ ids[id] <- $ids
         name: z.string().describe("Name of the entity"),
         type: z.string().describe("Type of the entity"),
         metadata: MetadataSchema.optional().describe("Additional metadata"),
-      }),
+      }).passthrough(),
       z.object({
         action: z.literal("update_entity"),
         id: z.string().describe("ID of the entity to update"),
         name: z.string().min(1).optional().describe("New name"),
         type: z.string().min(1).optional().describe("New type"),
         metadata: MetadataSchema.optional().describe("New metadata"),
-      }),
+      }).passthrough(),
       z.object({
         action: z.literal("delete_entity"),
         entity_id: z.string().describe("ID of the entity to delete"),
-      }),
+      }).passthrough(),
       z.object({
         action: z.literal("add_observation"),
         entity_id: z.string().optional().describe("ID of the entity"),
@@ -2267,7 +2267,7 @@ ids[id] <- $ids
         text: z.string().describe("The fact or observation"),
         metadata: MetadataSchema.optional().describe("Additional metadata"),
         deduplicate: z.boolean().optional().default(true).describe("Skip exact duplicates"),
-      }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
+      }).passthrough().refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
         message: "entity_id or entity_name is required",
         path: ["entity_id"],
       }),
@@ -2278,7 +2278,7 @@ ids[id] <- $ids
         relation_type: z.string().nonempty().describe("Type of the relationship"),
         strength: z.number().min(0).max(1).optional().default(1.0).describe("Strength of the relationship"),
         metadata: MetadataSchema.optional().describe("Additional metadata"),
-      }),
+      }).passthrough(),
       z.object({
         action: z.literal("run_transaction"),
         operations: z.array(z.discriminatedUnion("action", [
@@ -2289,7 +2289,7 @@ ids[id] <- $ids
                 name: z.string().describe("Name of the entity"),
                 type: z.string().describe("Type of the entity"),
                 metadata: MetadataSchema.optional().describe("Additional metadata"),
-              }),
+              }).passthrough(),
               z.string().describe("JSON string of parameters")
             ])
           }),
@@ -2298,7 +2298,7 @@ ids[id] <- $ids
             params: z.union([
               z.object({
                 entity_id: z.string().describe("ID of the entity to delete"),
-              }),
+              }).passthrough(),
               z.string().describe("JSON string of parameters")
             ])
           }),
@@ -2311,7 +2311,7 @@ ids[id] <- $ids
                 entity_type: z.string().optional().default("Unknown").describe("Type of the entity (only when creating)"),
                 text: z.string().describe("The fact or observation"),
                 metadata: MetadataSchema.optional().describe("Additional metadata"),
-              }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
+              }).passthrough().refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
                 message: "entity_id or entity_name is required",
                 path: ["entity_id"],
               }),
@@ -2327,12 +2327,12 @@ ids[id] <- $ids
                 relation_type: z.string().nonempty().describe("Type of the relationship"),
                 strength: z.number().min(0).max(1).optional().default(1.0).describe("Strength of the relationship"),
                 metadata: MetadataSchema.optional().describe("Additional metadata"),
-              }),
+              }).passthrough(),
               z.string().describe("JSON string of parameters")
             ])
           }),
         ])).describe("List of operations to be executed atomically")
-      }),
+      }).passthrough(),
       z.object({
         action: z.literal("add_inference_rule"),
         name: z.string().describe("Name of the rule"),
@@ -2379,7 +2379,10 @@ ids[id] <- $ids
       relation_type: z.string().optional().describe("For create_relation (required)"),
       strength: z.number().min(0).max(1).optional().describe("Optional for create_relation"),
       metadata: MetadataSchema.optional().describe("Optional for create_entity/update_entity/add_observation/create_relation/ingest_file"),
-      operations: z.array(z.any()).optional().describe("For run_transaction (required): List of operations to be executed atomically"),
+      operations: z.array(z.object({
+        action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity"]),
+        params: z.any().describe("Parameters for the operation as an object")
+      })).optional().describe("For run_transaction: List of operations to be executed atomically"),
     });
 
     this.mcp.addTool({
