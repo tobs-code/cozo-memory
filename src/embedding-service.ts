@@ -66,8 +66,8 @@ export class EmbeddingService {
   private cache: LRUCache<number[]>;
   private session: any | null = null;
   private tokenizer: any = null;
-  private readonly modelId: string = "Xenova/all-MiniLM-L6-v2";
-  private readonly dimensions: number = 384;
+  private readonly modelId: string = "Xenova/bge-m3";
+  private readonly dimensions: number = 1024;
   private queue: Promise<any> = Promise.resolve();
 
   constructor() {

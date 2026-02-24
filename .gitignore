@@ -41,3 +41,9 @@ web-ui/
 
 # Cache
 .cache/
+
+# Docker
+Dockerfile
+
+# Package Lock
+package-lock.json
