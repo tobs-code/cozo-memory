@@ -37,8 +37,8 @@ async function testIntegration() {
     });
     console.log("Add Observation Result:", obsResult);
 
-    // 4. Search (Tests GPU Embedding)
-    console.log("Searching (Testing GPU Embeddings)...");
+    // 4. Search (Tests Embedding)
+    console.log("Searching (Testing Embeddings)...");
     // Search is likely exposed via hybridSearch or a method on memory
     // Checking index.ts, it has hybridSearch property.
     // But maybe there is a search method on MemoryServer too?

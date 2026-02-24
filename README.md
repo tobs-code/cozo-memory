@@ -149,9 +149,17 @@ npm install
 npm run build
 ```
 
+### Windows Quickstart
+
+```bash
+npm install
+npm run build
+npm run start
+```
+
 Notes:
 - On first start, `@xenova/transformers` downloads the embedding model (may take time).
-- The embedding process runs on the CPU.
+- Embeddings are processed on the CPU.
 
 ## Start / Integration
 
@@ -413,12 +421,9 @@ Defaults: `older_than_days=30`, `max_observations=20`, `min_entity_degree=2`, `m
 
 ### Local ONNX Embeddings (Transformers)
 
-Default Model: `Xenova/bge-m3` (1024 dimensions). Loading order:
-1. GPU (`device: "gpu"`)
-2. DirectML (`device: "dml"`, relevant for Windows)
-3. CPU (`device: "cpu"`)
+Default Model: `Xenova/bge-m3` (1024 dimensions).
 
-Embeddings are kept in an LRU cache (1000 entries, 1h TTL). On embedding errors, a zero vector is returned to keep tool calls stable.
+Embeddings are processed on the CPU to ensure maximum compatibility. They are kept in an LRU cache (1000 entries, 1h TTL). On embedding errors, a zero vector is returned to keep tool calls stable.
 
 ### Hybrid Search (Vector + Keyword + Graph + Inference) + RRF
 

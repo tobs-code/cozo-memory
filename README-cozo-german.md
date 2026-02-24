@@ -136,7 +136,7 @@ npm install
 npm run build
 ```
 
-### Windows Quickstart (inkl. DirectML)
+### Windows Quickstart
 
 ```bash
 npm install
@@ -146,7 +146,7 @@ npm run start
 
 Hinweise:
 - Beim ersten Start lädt `@xenova/transformers` das Embedding-Modell (kann dauern).
-- Das Embedding-Backend versucht in dieser Reihenfolge zu laden: `gpu` → `dml` (DirectML, Windows) → `cpu`. Du erkennst den aktiven Pfad an den Logs (`[EmbeddingService] ... DirectML ...`).
+- Die Embeddings werden auf der CPU verarbeitet.
 
 ## Start / Integration
 
@@ -495,12 +495,9 @@ Beispiele:
 
 ### Local ONNX Embeddings (Transformers)
 
-Default-Modell: `Xenova/bge-m3` (1024 Dimensionen). Laden erfolgt in dieser Reihenfolge:
-1. GPU (`device: "gpu"`)
-2. DirectML (`device: "dml"`, relevant für Windows)
-3. CPU (`device: "cpu"`)
+Default-Modell: `Xenova/bge-m3` (1024 Dimensionen).
 
-Embeddings werden in einem LRU-Cache gehalten (1000 Einträge, 1h TTL). Bei Embedding-Fehlern wird ein Nullvektor zurückgegeben, damit Tool-Aufrufe stabil bleiben.
+Die Embeddings werden auf der CPU verarbeitet, um maximale Kompatibilität zu gewährleisten. Sie werden in einem LRU-Cache gehalten (1000 Einträge, 1h TTL). Bei Embedding-Fehlern wird ein Nullvektor zurückgegeben, damit Tool-Aufrufe stabil bleiben.
 
 ### Hybrid Search (Vector + Keyword + Graph + Inference) + RRF
 

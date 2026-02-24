@@ -131,7 +131,7 @@ async function runBenchmark() {
   const vectorOnlyStart = performance.now();
   const qEmb = await server.embeddingService.embed("apple");
   await server.db.run(`
-    ?[id, score] := ~entity_semantic { id | query: vec($qEmb), k: 10, ef: 20 }, score = 1.0
+    ?[id, score] := ~entity:semantic { id | query: vec($qEmb), k: 10, ef: 20 }, score = 1.0
   `, { qEmb });
   const vectorOnlyEnd = performance.now();
   const vectorTime = vectorOnlyEnd - vectorOnlyStart;
