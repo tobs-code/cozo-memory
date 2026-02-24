@@ -34,3 +34,10 @@ Thumbs.db
 
 # Exclude entire web-ui directory (incomplete)
 web-ui/
+
+# CozoDB
+*.db
+*.cozo.db
+
+# Cache
+.cache/
