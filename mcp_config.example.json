@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cozo-memory": {
+      "command": "node",
+      "args": [
+        "/path/to/cozo-memory/dist/index.js"
+      ]
+    }
+  }
+}
