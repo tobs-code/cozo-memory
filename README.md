@@ -84,15 +84,14 @@ Benchmarks on a standard developer laptop (Windows, Node.js 20+):
 
 | Metric | Value | Note |
 | :--- | :--- | :--- |
-| **Graph-Walking (Recursive)** | **~95 ms** | Vector Seed + Recursive Datalog Traversal |
-| **Graph-RAG (Breadth-First)** | **~85 ms** | Vector Seeds + 2-Hop Expansion |
+| **Graph-Walking (Recursive)** | **~130 ms** | Vector Seed + Recursive Datalog Traversal |
+| **Graph-RAG (Breadth-First)** | **~335 ms** | Vector Seeds + 2-Hop Expansion |
 | **Hybrid Search (Cache Hit)** | **< 0.1 ms** | **v0.8+ Semantic Cache** |
-| **Hybrid Search (Cold)** | **~57 ms** | FTS + HNSW + RRF Fusion |
-| **Vector Search (Raw)** | **~29 ms** | Pure semantic search as reference |
+| **Hybrid Search (Cold)** | **~35 ms** | FTS + HNSW + RRF Fusion |
+| **Vector Search (Raw)** | **~51 ms** | Pure semantic search as reference |
 | **FTS Search (Raw)** | **~12 ms** | Native Full-Text Search Performance |
-| **Overhead** | **~28 ms** | Cost for Graph Logic & Fusion (negligible) |
-| **Ingestion** | **~145 ms** | Per Op (Write + Embedding + FTS/LSH Indexing) |
-| **RAM Usage** | **~1.3 GB** | Primarily due to local `Xenova/bge-m3` model |
+| **Ingestion** | **~102 ms** | Per Op (Write + Embedding + FTS/LSH Indexing) |
+| **RAM Usage** | **~1.7 GB** | Primarily due to local `Xenova/bge-m3` model |
 
 ### Running Benchmarks
 

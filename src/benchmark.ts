@@ -139,6 +139,36 @@ async function runBenchmark() {
   console.log(`  -> Raw Vector Search Time: ${vectorTime.toFixed(2)}ms`);
   console.log(`  -> Overhead (Hybrid Logic + RRF): ${(avgQueryTime - vectorTime).toFixed(2)}ms`);
 
+  // Graph Benchmark
+  console.log("\n• Running Graph Benchmarks (Graph-RAG & Graph-Walking)...");
+  
+  // Graph-RAG
+  const ragStart = performance.now();
+  // @ts-ignore
+  await server.hybridSearch.graphRag({
+    query: "Entity_0",
+    limit: 20,
+    graphConstraints: {
+      maxDepth: 2
+    }
+  });
+  const ragEnd = performance.now();
+  console.log(`  -> Graph-RAG (2-Hop) Time: ${(ragEnd - ragStart).toFixed(2)}ms`);
+
+  // Graph-Walking
+  const walkStart = performance.now();
+  // @ts-ignore
+  const startEntityId = entities[0].id;
+  // @ts-ignore
+  await server.graph_walking({
+    query: "related concepts",
+    start_entity_id: startEntityId,
+    max_depth: 3,
+    limit: 10
+  });
+  const walkEnd = performance.now();
+  console.log(`  -> Graph-Walking (Recursive) Time: ${(walkEnd - walkStart).toFixed(2)}ms`);
+
   // Final Memory
   const memFinal = process.memoryUsage();
   console.log("\n• Final Memory Stats:");
