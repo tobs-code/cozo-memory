@@ -15,7 +15,7 @@ async function testGraphRagFilters() {
 
     try {
         const EMBEDDING_DIM = 1024;
-        // Schema erstellen
+        // Create schema
         await db.run(`
             {:create entity {id: String, created_at: Validity => name: String, type: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}
             {:create relationship {from_id: String, to_id: String, relation_type: String => metadata: Json}}
@@ -23,10 +23,10 @@ async function testGraphRagFilters() {
             {:create entity_rank {entity_id: String => pagerank: Float}}
         `);
 
-        // HNSW Index erstellen
+        // Create HNSW index
         await db.run(`::hnsw create entity:semantic {fields: [embedding], dim: ${EMBEDDING_DIM}, m: 16, ef_construction: 200, distance: Cosine}`);
 
-        // Test-Daten (Büro-Szenario)
+        // Test data (Office scenario)
         // id1: Person (Developer), id2: Person (Manager), id3: Project (AI)
         // id1 -> id3 (works_on), id2 -> id1 (manages)
         const now = Date.now();
@@ -61,14 +61,14 @@ async function testGraphRagFilters() {
         console.log("Relationships inserted.");
 
         console.log("\n--- Testing Graph-RAG: No Filters (Query 'Alice') ---");
-        // Sollte Alice finden und via Graph Bob (Manager) und Project X finden
+        // Should find Alice and via graph Bob (Manager) and Project X
         let results = await hybridSearch.graphRag({ query: "Alice", limit: 5 });
         console.log("Found:", results.map(r => `${r.id} (${r.name}, score: ${r.score.toFixed(4)})`));
 
         console.log("\n--- Testing Graph-RAG: Filter Type 'Project' ---");
-        // Sollte nur Project X finden (als Seed oder via Expansion, aber hier als Seed)
-        // Wenn wir Alice suchen, aber nur Projects erlauben, wird Alice nicht als Seed gefunden.
-        // Wenn Project X Alice ähnlich genug ist, wird es als Seed gefunden.
+        // Should only find Project X (as seed or via expansion, but here as seed)
+        // If we search for Alice but only allow Projects, Alice will not be found as seed.
+        // If Project X is similar enough to Alice, it will be found as seed.
         results = await hybridSearch.graphRag({ 
             query: "Project", 
             filters: { entityTypes: ['Project'] } 
@@ -76,7 +76,7 @@ async function testGraphRagFilters() {
         console.log("Found:", results.map(r => `${r.id} (${r.name})`));
 
         console.log("\n--- Testing Graph-RAG: Filter Metadata role='Developer' ---");
-        // Alice sollte Seed sein, Bob und Project X via Expansion
+        // Alice should be seed, Bob and Project X via expansion
         results = await hybridSearch.graphRag({ 
             query: "Alice", 
             filters: { metadata: { role: 'Developer' } } 

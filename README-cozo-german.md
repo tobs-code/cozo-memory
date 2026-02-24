@@ -123,12 +123,6 @@ Dieses Tool (`src/benchmark.ts`) führt folgende Tests durch:
 └───────────────────────────┘
 ```
 
-Optional (für UI):
-
-```
-Web UI (Vite/React) ──HTTP──► API Bridge (Express) ─► MemoryServer (embedded)
-```
-
 ## Installation
 
 ### Voraussetzungen
@@ -173,7 +167,7 @@ Standard-Datenbankpfad: `memory_db.cozo.db` im Projektroot (wird automatisch ang
   "mcpServers": {
     "cozo-memory": {
       "command": "node",
-      "args": ["C:/Pfad/zu/m2/dist/index.js"]
+      "args": ["C:/Pfad/zu/cozo-memory/dist/index.js"]
     }
   }
 }
@@ -539,7 +533,7 @@ Inference nutzt mehrere Strategien (nicht persistierend):
 - **Expertise-Regel**: `Person` + `works_on` + `uses_tech` ⇒ `expert_in` (confidence 0.7)
 - **Query-Triggered Expertise**: Bei Suchanfragen mit Keywords wie `expert`, `skill`, `kenntnisse`, `kompetenz` etc. wird automatisch eine dedizierte Expertensuche über das Graph-Netzwerk gestartet.
 
-## Optional: HTTP API Bridge + Web UI
+## Optional: HTTP API Bridge
 
 ### API Bridge
 

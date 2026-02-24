@@ -1,17 +1,17 @@
 import { AutoModel, env } from "@xenova/transformers";
 import * as path from 'path';
 
-// Konfiguriere Cache-Pfad
+// Configure cache path
 const CACHE_DIR = path.resolve('./.cache');
 env.cacheDir = CACHE_DIR;
 
 const MODEL_ID = "Xenova/bge-m3";
 
 async function downloadModel() {
-    console.log(`Lade FP32 Modell für ${MODEL_ID} herunter...`);
+    console.log(`Downloading FP32 model for ${MODEL_ID}...`);
     // quantized: false forces FP32 model download
     await AutoModel.from_pretrained(MODEL_ID, { quantized: false });
-    console.log("Download abgeschlossen.");
+    console.log("Download completed.");
 }
 
 downloadModel();

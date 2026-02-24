@@ -18,11 +18,11 @@ async function runTest() {
   );
 
   try {
-    console.log("Verbinde zum MCP-Server für Graph-Walking Test...");
+    console.log("Connecting to MCP server for Graph-Walking Test...");
     await client.connect(transport);
-    console.log("Verbunden!");
+    console.log("Connected!");
 
-    console.log("1. Bereite Test-Daten vor...");
+    console.log("1. Preparing test data...");
     
     // Cleanup
     await client.callTool({
@@ -30,22 +30,22 @@ async function runTest() {
       arguments: { action: "clear_memory", confirm: true }
     });
 
-    // Erstelle ein semantisches Netzwerk
-    // Thema: Künstliche Intelligenz und deren Anwendungen
+    // Create a semantic network
+    // Topic: Artificial Intelligence and its applications
     
     const entities = [
-      { name: "KI-Forschung", type: "Field", text: "Forschung an künstlicher Intelligenz und maschinellem Lernen." },
-      { name: "Neural Networks", type: "Technology", text: "Neuronale Netze sind die Basis für modernes Deep Learning." },
-      { name: "Transformer-Architektur", type: "Architecture", text: "Transformer sind spezialisierte neuronale Netze für Sprachverarbeitung." },
-      { name: "Large Language Models", type: "Application", text: "LLMs nutzen Transformer, um menschenähnlichen Text zu generieren." },
-      { name: "GPT-4", type: "Model", text: "GPT-4 ist ein leistungsfähiges Large Language Model von OpenAI." },
-      { name: "Ethik in der KI", type: "Topic", text: "Diskussion über verantwortungsvolle Entwicklung von KI-Systemen." },
-      { name: "Quantencomputing", type: "Field", text: "Quantencomputer nutzen Quantenmechanik für Berechnungen." } // Etwas weiter weg
+      { name: "AI Research", type: "Field", text: "Research on artificial intelligence and machine learning." },
+      { name: "Neural Networks", type: "Technology", text: "Neural networks are the basis for modern deep learning." },
+      { name: "Transformer Architecture", type: "Architecture", text: "Transformers are specialized neural networks for language processing." },
+      { name: "Large Language Models", type: "Application", text: "LLMs use transformers to generate human-like text." },
+      { name: "GPT-4", type: "Model", text: "GPT-4 is a powerful Large Language Model from OpenAI." },
+      { name: "Ethics in AI", type: "Topic", text: "Discussion about responsible development of AI systems." },
+      { name: "Quantum Computing", type: "Field", text: "Quantum computers use quantum mechanics for calculations." } // Slightly further away
     ];
 
     const entityIds: Record<string, string> = {};
 
-    console.log("Erstelle Entitäten über 'add_observation'...");
+    console.log("Creating entities via 'add_observation'...");
     for (const ent of entities) {
       const res: any = await client.callTool({
         name: "mutate_memory",
@@ -62,35 +62,35 @@ async function runTest() {
       const parsed = JSON.parse(content);
       
       if (parsed.error) {
-        console.error(`Fehler beim Erstellen von ${ent.name}:`, parsed.error);
+        console.error(`Error creating ${ent.name}:`, parsed.error);
         continue;
       }
 
       const id = parsed.entity_id || parsed.id;
       if (!id) {
-        console.error(`Keine ID erhalten für ${ent.name}. Response:`, JSON.stringify(parsed, null, 2));
+        console.error(`No ID received for ${ent.name}. Response:`, JSON.stringify(parsed, null, 2));
       }
       entityIds[ent.name] = id;
     }
 
-    console.log("Erstellte Entitäten:", Object.keys(entityIds));
+    console.log("Created entities:", Object.keys(entityIds));
 
-    // Beziehungen erstellen (Graph-Struktur)
+    // Create relationships (graph structure)
     const relations = [
-      ["KI-Forschung", "Neural Networks", "entwickelt"],
-      ["Neural Networks", "Transformer-Architektur", "ermöglicht"],
-      ["Transformer-Architektur", "Large Language Models", "ist Basis von"],
-      ["Large Language Models", "GPT-4", "beinhaltet"],
-      ["GPT-4", "Ethik in der KI", "diskutiert in"],
-      ["KI-Forschung", "Ethik in der KI", "beinhaltet"],
-      ["KI-Forschung", "Quantencomputing", "nutzt eventuell"]
+      ["AI Research", "Neural Networks", "develops"],
+      ["Neural Networks", "Transformer Architecture", "enables"],
+      ["Transformer Architecture", "Large Language Models", "is basis of"],
+      ["Large Language Models", "GPT-4", "includes"],
+      ["GPT-4", "Ethics in AI", "discussed in"],
+      ["AI Research", "Ethics in AI", "includes"],
+      ["AI Research", "Quantum Computing", "might use"]
     ];
 
     for (const [from, to, type] of relations) {
       const fromId = entityIds[from];
       const toId = entityIds[to];
       if (!fromId || !toId) {
-        console.error(`Fehler: ID für ${from} oder ${to} nicht gefunden!`);
+        console.error(`Error: ID for ${from} or ${to} not found!`);
         continue;
       }
       await client.callTool({
@@ -104,51 +104,51 @@ async function runTest() {
       });
     }
 
-    console.log("Beziehungen erstellt.");
+    console.log("Relationships created.");
 
-    console.log("\n2. Test: Graph Walking (Vektor-Seed)");
-    console.log("Suche nach: 'Wie funktionieren moderne Sprachmodelle?'");
+    console.log("\n2. Test: Graph Walking (Vector Seed)");
+    console.log("Searching for: 'How do modern language models work?'");
     const walkRes1: any = await client.callTool({
       name: "query_memory",
       arguments: {
         action: "graph_walking",
-        query: "Wie funktionieren moderne Sprachmodelle?",
+        query: "How do modern language models work?",
         max_depth: 3,
         limit: 5
       }
     });
-    console.log("Ergebnis Walk 1:", JSON.stringify(JSON.parse(walkRes1.content[0].text), null, 2));
+    console.log("Result Walk 1:", JSON.stringify(JSON.parse(walkRes1.content[0].text), null, 2));
 
-    console.log("\n3. Test: Graph Walking (Start-Entity)");
-    console.log(`Starte bei 'GPT-4' und suche nach Ethik`);
+    console.log("\n3. Test: Graph Walking (Start Entity)");
+    console.log(`Start at 'GPT-4' and search for ethics`);
     const walkRes2: any = await client.callTool({
       name: "query_memory",
       arguments: {
         action: "graph_walking",
-        query: "Ethische Bedenken bei KI",
+        query: "Ethical concerns in AI",
         start_entity_id: entityIds["GPT-4"],
         max_depth: 2,
         limit: 3
       }
     });
-    console.log("Ergebnis Walk 2:", JSON.stringify(JSON.parse(walkRes2.content[0].text), null, 2));
+    console.log("Result Walk 2:", JSON.stringify(JSON.parse(walkRes2.content[0].text), null, 2));
 
-    console.log("\n4. Test: Graph Walking (Distanz-Check)");
-    console.log("Suche nach 'Quantencomputer' ausgehend von 'GPT-4' (sollte kaum Relevanz haben oder zu weit weg sein)");
+    console.log("\n4. Test: Graph Walking (Distance Check)");
+    console.log("Search for 'quantum computer' starting from 'GPT-4' (should have little relevance or be too far away)");
     const walkRes3: any = await client.callTool({
       name: "query_memory",
       arguments: {
         action: "graph_walking",
-        query: "Quantencomputing Hardware",
+        query: "Quantum computing hardware",
         start_entity_id: entityIds["GPT-4"],
         max_depth: 2,
         limit: 5
       }
     });
-    console.log("Ergebnis Walk 3:", JSON.stringify(JSON.parse(walkRes3.content[0].text), null, 2));
+    console.log("Result Walk 3:", JSON.stringify(JSON.parse(walkRes3.content[0].text), null, 2));
 
   } catch (error) {
-    console.error("Test fehlgeschlagen:", error);
+    console.error("Test failed:", error);
   } finally {
     process.exit(0);
   }

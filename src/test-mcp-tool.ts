@@ -4,61 +4,49 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import path from "path";
 import { fileURLToPath } from "url";
 
-const serverPath = path.join(__dirname, "../dist/index.js");
-
-async function runTest() {
-  const transport = new StdioClientTransport({
-    command: "node",
-    args: [serverPath],
-    env: { ...process.env, NODE_ENV: "development" }
-  });
-
+async function main() {
+  console.log("Connecting to MCP server...");
   const client = new Client(
-    { name: "test-client", version: "1.0.0" },
-    { capabilities: {} }
+    {
+      name: "mcp-test-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    }
   );
 
-  try {
-    console.log("Verbinde zum MCP-Server...");
-    await client.connect(transport);
-    console.log("Verbunden!");
+  const transport = new StdioClientTransport({
+    command: "npx",
+    args: ["ts-node", "src/index.ts"],
+  });
 
-    // Erstmal Daten anlegen, falls die DB leer ist (test-advanced-search.ts hat sie evtl. gelöscht oder sie ist persistent)
-    // Wir nutzen advancedSearch direkt auf den vorhandenen Daten von vorhin (memory_db.cozo.db)
-    
-    console.log("Führe 'add_observation' Tool-Call aus...");
-    await client.callTool({
-      name: "mutate_memory",
-      arguments: {
-        action: "add_observation",
-        entity_name: "Alice",
-        entity_type: "Person",
-        text: "Alice ist eine erfahrene TypeScript-Entwicklerin.",
-        metadata: { role: "Developer", expertise: "TypeScript" }
-      }
-    });
+  await client.connect(transport);
+  console.log("Connected!");
 
-    console.log("Führe 'advancedSearch' Tool-Call aus...");
-    const result = await client.callTool({
-      name: "query_memory",
-      arguments: {
-        action: "advancedSearch",
-        query: "Entwickler",
-        limit: 5,
-        filters: {
-          entityTypes: ["Person"]
-        }
-      }
-    });
+  console.log("Executing 'add_observation' Tool-Call...");
+  await client.callTool({
+    name: "add_observation",
+    arguments: {
+      text: "The sky is blue.",
+      entity_id: "nature_facts",
+    },
+  });
 
-    console.log("Ergebnis vom Tool:");
-    console.log(JSON.stringify(result, null, 2));
+  console.log("Executing 'advancedSearch' Tool-Call...");
+  const result = await client.callTool({
+    name: "advancedSearch",
+    arguments: {
+      query: "blue sky",
+    },
+  });
 
-  } catch (error) {
-    console.error("Fehler beim Testen:", error);
-  } finally {
-    process.exit(0);
-  }
+  console.log("Result from Tool:");
+  console.log(JSON.stringify(result, null, 2));
+
+  await client.close();
 }
 
-runTest();
+main().catch((error) => {
+  console.log("Error during test:", error);
+});

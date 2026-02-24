@@ -18,13 +18,13 @@ async function runTest() {
   );
 
   try {
-    console.log("Verbinde zum MCP-Server für Graph-RAG Test...");
+    console.log("Connecting to MCP server for Graph-RAG Test...");
     await client.connect(transport);
-    console.log("Verbunden!");
+    console.log("Connected!");
 
-    console.log("1. Erstelle Test-Daten (Graph)...");
+    console.log("1. Create test data (Graph)...");
     
-    // Entitäten
+    // Entities
     const projectXRes = await client.callTool({
       name: "mutate_memory",
       arguments: {
@@ -58,9 +58,9 @@ async function runTest() {
     });
     const aliceId = (JSON.parse((aliceRes as any).content[0].text) as any).id;
 
-    console.log(`IDs erstellt: Project-X=${projectXId}, Bob=${bobId}, Alice=${aliceId}`);
+    console.log(`IDs created: Project-X=${projectXId}, Bob=${bobId}, Alice=${aliceId}`);
 
-    // Beziehungen
+    // Relationships
     await client.callTool({
       name: "mutate_memory",
       arguments: {
@@ -81,13 +81,13 @@ async function runTest() {
       }
     });
 
-    // Beobachtungen
+    // Observations
     await client.callTool({
       name: "mutate_memory",
       arguments: {
         action: "add_observation",
         entity_id: aliceId,
-        text: "Alice arbeitet an der Frontend-Architektur von Project-X."
+        text: "Alice works on the frontend architecture of Project-X."
       }
     });
 
@@ -96,43 +96,43 @@ async function runTest() {
       arguments: {
         action: "add_observation",
         entity_id: projectXId,
-        text: "Project-X ist eine neue E-Commerce Plattform."
+        text: "Project-X is a new e-commerce platform."
       }
     });
 
-    console.log("2. Führe 'graph_rag' Tool-Call aus...");
-    console.log("Anfrage: 'Wer arbeitet an Project-X?'");
+    console.log("2. Execute 'graph_rag' tool call...");
+    console.log("Query: 'Who works on Project-X?'");
     
     const result = await client.callTool({
       name: "query_memory",
       arguments: {
         action: "graph_rag",
-        query: "Project-X Architektur",
+        query: "Project-X architecture",
         limit: 5,
         max_depth: 2
       }
     });
 
-    console.log("\n--- Graph-RAG Ergebnis ---");
+    console.log("\n--- Graph-RAG Result ---");
     console.log(JSON.stringify(result, null, 2));
     
     if (result && (result as any).content) {
       const content = JSON.parse((result as any).content[0].text);
-      console.log(`\nGefundene Einträge: ${content.length}`);
+      console.log(`\nFound entries: ${content.length}`);
       
       const names = content.map((r: any) => r.name);
-      console.log("Gefundene Entitäten:", [...new Set(names)]);
+      console.log("Found entities:", [...new Set(names)]);
       
       if (names.some((n: string) => n.includes("Alice") || n === "Alice") && names.includes("Project-X")) {
-        console.log("\n✅ Test ERFOLGREICH: Alice und Project-X wurden via Graph-Expansion gefunden.");
+        console.log("\n✅ Test SUCCESSFUL: Alice and Project-X were found via graph expansion.");
       } else {
-        console.log("\n❌ Test FEHLGESCHLAGEN: Erwartete Entitäten nicht vollständig im Ergebnis.");
-        console.log("Gesuchte Entitäten: Alice, Project-X");
+        console.log("\n❌ Test FAILED: Expected entities not fully in result.");
+        console.log("Sought entities: Alice, Project-X");
       }
     }
 
   } catch (error) {
-    console.error("Fehler beim Testen:", error);
+    console.error("Error testing:", error);
   } finally {
     process.exit(0);
   }

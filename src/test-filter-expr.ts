@@ -36,9 +36,9 @@ async function testFilterExpr() {
             const res = await db.run(`
                 ?[id, type] := ~test_entity:semantic{id, type | query: vec($vec1), k: 2, ef: 100, filter: type == 'typeA'}
             `, { vec1 });
-            console.log("Ergebnisse (type == 'typeA'):", res.rows);
+            console.log("Results (type == 'typeA'):", res.rows);
         } catch (e: any) {
-            console.error("Fehler (type == 'typeA'):", e.message || e);
+            console.error("Error (type == 'typeA'):", e.message || e);
         }
 
         console.log("--- Test: Filter with parameter (type in output) ---");
@@ -46,9 +46,9 @@ async function testFilterExpr() {
             const res = await db.run(`
                 ?[id, type] := ~test_entity:semantic{id, type | query: vec($vec1), k: 2, ef: 100, filter: type == $allowed_type}
             `, { vec1, allowed_type: 'typeA' });
-            console.log("Ergebnisse (type == $allowed_type):", res.rows);
+            console.log("Results (type == $allowed_type):", res.rows);
         } catch (e: any) {
-            console.error("Fehler (type == $allowed_type):", e.message || e);
+            console.error("Error (type == $allowed_type):", e.message || e);
         }
 
         console.log("Creating table (with Validity)...");
@@ -73,13 +73,13 @@ async function testFilterExpr() {
             const res = await db.run(`
                 ?[id, type] := ~test_entity_v:semantic{id, type | query: vec($vec1), k: 2, ef: 100, filter: is_in(type, $allowed_types)}
             `, { vec1, allowed_types });
-            console.log("Ergebnisse (is_in(type, ...)):", res.rows);
+            console.log("Results (is_in(type, ...)):", res.rows);
         } catch (e: any) {
-            console.error("Fehler (is_in):", e.message || e);
+            console.error("Error (is_in):", e.message || e);
         }
 
     } catch (e: any) {
-        console.error("Globaler Fehler:", e.message || e);
+        console.error("Global error:", e.message || e);
     }
 }
 

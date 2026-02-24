@@ -1,24 +1,24 @@
 import { EmbeddingService } from "./embedding-service";
 
 async function main() {
-    console.log("Starte Embedding Test...");
+    console.log("Starting Embedding Test...");
     const service = new EmbeddingService();
     
     try {
-        console.log("Erzeuge Embedding für 'Hallo Welt'...");
-        const vec = await service.embed("Hallo Welt");
-        console.log("Embedding Vektor Länge:", vec.length);
+        console.log("Generating embedding for 'Hello World'...");
+        const vec = await service.embed("Hello World");
+        console.log("Embedding vector length:", vec.length);
         
-        // Prüfe ob alles 0 ist
+        // Check if all are 0
         const isAllZero = vec.every(v => v === 0);
-        console.log("Ist Vektor nur Nullen?", isAllZero);
+        console.log("Is vector only zeros?", isAllZero);
         
         if (!isAllZero) {
-            console.log("Erste 5 Werte:", vec.slice(0, 5));
+            console.log("First 5 values:", vec.slice(0, 5));
         }
         
     } catch (e: any) {
-        console.error("Fehler im Test:", e);
+        console.error("Error in test:", e);
     }
 }
 

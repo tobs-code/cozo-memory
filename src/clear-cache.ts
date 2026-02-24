@@ -9,19 +9,19 @@ async function main() {
         const db = new CozoDb("sqlite", dbPath);
         
         const keys = await db.run("?[hash] := *search_cache{query_hash: hash}");
-        console.log(`Gefunden ${keys.rows.length} Cache Einträge.`);
+        console.log(`Found ${keys.rows.length} cache entries.`);
         
         if (keys.rows.length > 0) {
             await db.run("?[hash] <- $hashes :delete search_cache {query_hash: hash}", {
                 hashes: keys.rows
             });
-            console.log("Cache geleert.");
+            console.log("Cache cleared.");
         } else {
-            console.log("Cache ist bereits leer.");
+            console.log("Cache is already empty.");
         }
         
     } catch (e: any) {
-        console.error("Fehler:", e.message);
+        console.error("Error:", e.message);
     }
 }
 

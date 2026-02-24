@@ -1,13 +1,14 @@
 import { AutoTokenizer, env } from "@xenova/transformers";
-import * as ort from 'onnxruntime-node';
+const ort = require('onnxruntime-node');
 import * as path from 'path';
 import * as fs from 'fs';
 
-// Konfiguriere Cache-Pfad
+// Configure cache path
 const CACHE_DIR = path.resolve('./.cache');
 env.cacheDir = CACHE_DIR;
 
 const MODEL_ID = "Xenova/bge-m3";
+const EMBEDDING_DIM = 1024;
 const QUANTIZED = false; 
 const MODEL_FILE = QUANTIZED ? "model_quantized.onnx" : "model.onnx";
 
@@ -15,36 +16,36 @@ const BATCH_SIZE = 10;
 const NUM_TEXTS = 200;
 
 const texts = Array.from({ length: NUM_TEXTS }, (_, i) => 
-  `Dies ist ein komplexer Testsatz Nummer ${i} für den Performance-Vergleich von CPU und GPU Embeddings. Je länger der Text ist, desto deutlicher sollte der Vorteil der parallelen Verarbeitung auf der Grafikkarte sichtbar werden, insbesondere bei Transformer-Modellen wie BGE-M3. Wir testen hier die DirectML Integration auf Windows mit einer RTX 2080.`
+  `This is a complex test sentence number ${i} for the performance comparison of CPU and GPU embeddings. The longer the text, the more apparent the advantage of parallel processing on the graphics card should be, especially with transformer models like BGE-M3. We are testing the DirectML integration on Windows with an RTX 2080 here.`
 );
 
 async function runBenchmark() {
   console.log("==========================================");
-  console.log(`Starte Benchmark: CPU vs GPU (DirectML) [FP32 Mode]`);
+  console.log(`Starting Benchmark: CPU vs GPU (DirectML) [FP32 Mode]`);
   console.log(`Batch Size: ${BATCH_SIZE}, Total Texts: ${NUM_TEXTS}`);
   
   // 1. Prepare Model Path
   const modelPath = path.join(CACHE_DIR, 'Xenova', 'bge-m3', 'onnx', MODEL_FILE);
   if (!fs.existsSync(modelPath)) {
-      console.error(`Modell nicht gefunden unter: ${modelPath}`);
+      console.error(`Model not found at: ${modelPath}`);
       return;
   }
-  console.log(`Modellpfad: ${modelPath}`);
+  console.log(`Model path: ${modelPath}`);
 
   // 2. Load Tokenizer
-  console.log("Lade Tokenizer...");
+  console.log("Loading Tokenizer...");
   const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
 
   // 3. Define Helper for Inference
-  async function runInference(session: ort.InferenceSession, label: string, useInt32: boolean = false) {
-      console.log(`Starte ${label} Inferenz (Int32 Inputs: ${useInt32})...`);
+  async function runInference(session: any, label: string, useInt32: boolean = false) {
+      console.log(`Starting ${label} inference (Int32 Inputs: ${useInt32})...`);
       const start = performance.now();
       
       for (let i = 0; i < texts.length; i += BATCH_SIZE) {
           const batchTexts = texts.slice(i, i + BATCH_SIZE);
           const model_inputs = await tokenizer(batchTexts, { padding: true, truncation: true });
           
-          const feeds: Record<string, ort.Tensor> = {};
+          const feeds: Record<string, any> = {};
           
           for (const [key, value] of Object.entries(model_inputs)) {
               if (key === 'input_ids' || key === 'attention_mask' || key === 'token_type_ids') {
@@ -70,7 +71,7 @@ async function runBenchmark() {
                   }
 
                   try {
-                    feeds[key] = new ort.Tensor(type, data, dims);
+                    feeds[key] = new (ort as any).Tensor(type, data, dims);
                   } catch (err: any) {
                       console.error(`Error creating tensor for ${key}:`, err.message);
                       throw err;
@@ -85,9 +86,9 @@ async function runBenchmark() {
       
       const end = performance.now();
       const duration = (end - start) / 1000;
-      console.log(`\n${label} Zeit: ${duration.toFixed(2)}s`);
+      console.log(`\n${label} Time: ${duration.toFixed(2)}s`);
       const speed = texts.length / duration;
-      console.log(`${label} Geschwindigkeit: ${speed.toFixed(2)} Embeddings/s`);
+      console.log(`${label} Speed: ${speed.toFixed(2)} Embeddings/s`);
       return speed;
   }
 
@@ -98,7 +99,7 @@ async function runBenchmark() {
       const sessionCpu = await ort.InferenceSession.create(modelPath, {
           executionProviders: ['cpu']
       });
-      console.log("CPU Session erstellt.");
+      console.log("CPU Session created.");
       // CPU usually handles Int64 fine
       speedCpu = await runInference(sessionCpu, "CPU", false);
 
@@ -117,13 +118,13 @@ async function runBenchmark() {
       const startGpuLoad = performance.now();
       const sessionGpu = await ort.InferenceSession.create(modelPath, sessionOptions);
       const endGpuLoad = performance.now();
-      console.log(`GPU Session erstellt in ${((endGpuLoad - startGpuLoad) / 1000).toFixed(2)}s`);
+      console.log(`GPU Session created in ${((endGpuLoad - startGpuLoad) / 1000).toFixed(2)}s`);
       
       // Warmup
       {
           const text = ["Warmup"];
           const model_inputs = await tokenizer(text, { padding: true, truncation: true });
-          const feeds: Record<string, ort.Tensor> = {};
+          const feeds: Record<string, any> = {};
           for (const [key, value] of Object.entries(model_inputs)) {
                if (key === 'input_ids' || key === 'attention_mask' || key === 'token_type_ids') {
                   // @ts-ignore
@@ -131,7 +132,7 @@ async function runBenchmark() {
                    // @ts-ignore
                   const dims = value.dims;
                   if (!(data instanceof BigInt64Array)) data = BigInt64Array.from(data);
-                  feeds[key] = new ort.Tensor('int64', data, dims);
+                  feeds[key] = new (ort as any).Tensor('int64', data, dims);
                }
           }
           await sessionGpu.run(feeds);
@@ -144,7 +145,7 @@ async function runBenchmark() {
       if (speedCpu > 0) {
           const speedup = speedGpu / speedCpu;
           console.log("\n==========================================");
-          console.log(`Ergebnis: GPU ist ${speedup.toFixed(2)}x schneller als CPU.`);
+          console.log(`Result: GPU is ${speedup.toFixed(2)}x faster than CPU.`);
           console.log("==========================================");
       }
       
@@ -154,14 +155,14 @@ async function runBenchmark() {
       // We can try catching it.
       /*
       try {
-          console.log("\nVersuche GPU mit Int32 Inputs (experimentell)...");
+          console.log("\nAttempting GPU with Int32 Inputs (experimental)...");
           const speedGpu32 = await runInference(sessionGpu, "GPU (Int32)", true);
            if (speedCpu > 0) {
               const speedup = speedGpu32 / speedCpu;
-              console.log(`Ergebnis (Int32): GPU ist ${speedup.toFixed(2)}x schneller als CPU.`);
+              console.log(`Result (Int32): GPU is ${speedup.toFixed(2)}x faster than CPU.`);
           }
       } catch(e) {
-          console.log("Int32 Inferenz nicht unterstützt vom Modell (erwartet).");
+          console.log("Int32 inference not supported by model (expected).");
       }
       */
 

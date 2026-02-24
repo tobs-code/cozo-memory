@@ -19,20 +19,20 @@ export class InferenceEngine {
   }
 
   /**
-   * Inferiert Beziehungen für eine bestimmte Entität basierend auf verschiedenen Strategien
+   * Infers relations for a specific entity based on various strategies
    */
   async inferRelations(entityId: string): Promise<InferredRelation[]> {
     const results: InferredRelation[] = [];
 
-    // 1. Co-occurrence in Observations (gleiche Entität in Texten erwähnt)
+    // 1. Co-occurrence in Observations (same entity mentioned in texts)
     const coOccurrences = await this.findCoOccurrences(entityId);
     results.push(...coOccurrences);
 
-    // 2. Vektor-Proximity (Semantische Ähnlichkeit)
+    // 2. Vector Proximity (Semantic Similarity)
     const similar = await this.findSimilarEntities(entityId);
     results.push(...similar);
 
-    // 3. Transitive Relationen (A -> B, B -> C => A -> C)
+    // 3. Transitive Relations (A -> B, B -> C => A -> C)
     const transitive = await this.findTransitiveRelations(entityId);
     results.push(...transitive);
 
@@ -54,9 +54,9 @@ export class InferenceEngine {
 
   private async findCoOccurrences(entityId: string): Promise<InferredRelation[]> {
     try {
-      // Suche nach Entitäten, deren Namen in den Observations der Ziel-Entität vorkommen
-      // Oder Entitäten, die die gleiche Observation referenzieren (falls wir Multi-Entity-Observations hätten)
-      // Hier: Suche nach Entitäten, deren Name im Text der Observations von entityId vorkommt
+      // Search for entities whose names appear in the observations of the target entity
+      // Or entities that reference the same observation (if we had multi-entity observations)
+      // Here: Search for entities whose name appears in the text of the observations of entityId
       const query = `
         ?[other_id, other_name, confidence, reason] :=
           *observation{entity_id: $target, text, @ "NOW"},
@@ -64,7 +64,7 @@ export class InferenceEngine {
           other_id != $target,
           str_includes(text, other_name),
           confidence = 0.7,
-          reason = concat('Erwähnung von ', other_name, ' in Beobachtungen')
+          reason = concat('Mention of ', other_name, ' in observations')
       `;
       const res = await this.db.run(query, { target: entityId });
       
@@ -83,12 +83,12 @@ export class InferenceEngine {
 
   private async findSimilarEntities(entityId: string): Promise<InferredRelation[]> {
     try {
-      // Hole Embedding der Ziel-Entität
+      // Get embedding of the target entity
       const entityRes = await this.db.run('?[embedding] := *entity{id: $id, embedding, @ "NOW"}', { id: entityId });
       if (entityRes.rows.length === 0) return [];
       const embedding = entityRes.rows[0][0];
 
-      // Suche semantisch ähnliche Entitäten via HNSW
+      // Search semantically similar entities via HNSW
       const query = `
         ?[other_id, other_name, confidence, reason] :=
           ~entity:semantic { id: other_id, embedding |
@@ -101,7 +101,7 @@ export class InferenceEngine {
           other_id != $id,
           dist < 0.2,
           confidence = (1.0 - dist) * 0.9,
-          reason = 'Semantische Ähnlichkeit'
+          reason = 'Semantic Similarity'
       `;
       const res = await this.db.run(query, { id: entityId, emb: embedding });
 
@@ -120,7 +120,7 @@ export class InferenceEngine {
 
   private async findTransitiveRelations(entityId: string): Promise<InferredRelation[]> {
     try {
-      // Findet A -> B -> C und schlägt A -> C vor
+      // Finds A -> B -> C and proposes A -> C
       const query = `
         ?[target_id, target_name, confidence, reason] :=
           *relationship{from_id: $id, to_id: mid_id, relation_type: r1, @ "NOW"},
@@ -128,7 +128,7 @@ export class InferenceEngine {
           *entity{id: target_id, name: target_name, @ "NOW"},
           target_id != $id,
           confidence = 0.5,
-          reason = concat('Indirekte Verbindung via ', r1, ' und ', r2)
+          reason = concat('Indirect connection via ', r1, ' and ', r2)
       `;
       const res = await this.db.run(query, { id: entityId });
 
@@ -154,7 +154,7 @@ export class InferenceEngine {
           *relationship{from_id: proj_id, to_id: tech_id, relation_type: 'uses_tech', @ "NOW"},
           *entity{id: tech_id, name: tech_name, type: tech_type, @ "NOW"},
           confidence = 0.7,
-          reason = concat('Transitive Expertise via works_on -> uses_tech: ', tech_name)
+          reason = concat('Transitive expertise via works_on -> uses_tech: ', tech_name)
       `;
       const res = await this.db.run(query, { id: entityId });
 
@@ -183,13 +183,13 @@ export class InferenceEngine {
   }
 
   /**
-   * Führt einen rekursiven "Graph Walk" durch, der sowohl expliziten Beziehungen als auch
-   * semantischer Ähnlichkeit folgt. Dies ermöglicht das Finden von Pfaden wie:
-   * A -> (explizit) -> B -> (semantisch ähnlich) -> C -> (explizit) -> D
+   * Performs a recursive "Graph Walk" that follows both explicit relations and
+   * semantic similarity. This enables finding paths like:
+   * A -> (explicit) -> B -> (semantically similar) -> C -> (explicit) -> D
    * 
-   * @param startEntityId Die Start-Entität
-   * @param maxDepth Maximale Tiefe der Suche (Default: 3)
-   * @param minSimilarity Minimale Ähnlichkeit für semantische Sprünge (0.0 - 1.0, Default: 0.7)
+   * @param startEntityId The starting entity
+   * @param maxDepth Maximum depth of the search (Default: 3)
+   * @param minSimilarity Minimum similarity for semantic jumps (0.0 - 1.0, Default: 0.7)
    */
   async semanticGraphWalk(startEntityId: string, maxDepth: number = 3, minSimilarity: number = 0.7): Promise<{
     entity_id: string;
@@ -198,23 +198,23 @@ export class InferenceEngine {
     path_type: string; // 'explicit', 'semantic', 'mixed'
   }[]> {
     try {
-      // Hole Embedding der Start-Entität für den ersten semantischen Sprung
+      // Get embedding of the start entity for the first semantic jump
       const entityRes = await this.db.run('?[embedding] := *entity{id: $id, embedding, @ "NOW"}', { id: startEntityId });
       if (entityRes.rows.length === 0) return [];
       const startEmbedding = entityRes.rows[0][0];
 
-      // Rekursive Datalog-Query
-      // Wir verzichten auf komplexe Aggregation von Strings im Datalog, da dies Fehler verursachen kann.
-      // Stattdessen gruppieren wir implizit auch nach 'type' und filtern später in JS.
+      // Recursive Datalog query
+      // We avoid complex aggregation of strings in Datalog as this can cause errors.
+      // Instead, we implicitly group by 'type' as well and filter later in JS.
       const query = `
-        # 1. Startpunkt
+        # 1. Start point
         path[id, depth, score, type] := 
           id = $startId, 
           depth = 0, 
           score = 1.0, 
           type = 'start'
 
-        # 2. Rekursion: Explizite Beziehungen folgen
+        # 2. Recursion: Follow explicit relations
         path[next_id, new_depth, new_score, new_type] :=
           path[curr_id, depth, score, curr_type],
           depth < $maxDepth,
@@ -223,26 +223,26 @@ export class InferenceEngine {
           new_score = score * strength,
           new_type = if(curr_type == 'start', 'explicit', if(curr_type == 'explicit', 'explicit', 'mixed'))
 
-        # 3. Rekursion: Semantische Ähnlichkeit folgen (via HNSW Index)
+        # 3. Recursion: Follow semantic similarity (via HNSW Index)
         path[next_id, new_depth, new_score, new_type] :=
           path[curr_id, depth, score, curr_type],
           depth < $maxDepth,
-          *entity{id: curr_id, embedding: curr_emb, @ "NOW"}, # Embedding laden
-          # Suche die K ähnlichsten Nachbarn zum aktuellen Embedding
+          *entity{id: curr_id, embedding: curr_emb, @ "NOW"}, # Load embedding
+          # Search for the K nearest neighbors to the current embedding
           ~entity:semantic { id: next_id |
             query: curr_emb,
             k: 5,
             ef: 20,
             bind_distance: dist
           },
-          next_id != curr_id, # Keine Selbst-Referenz
+          next_id != curr_id, # No self-reference
           sim = 1.0 - dist,
           sim >= $minSim,
           new_depth = depth + 1,
-          new_score = score * sim * 0.8, # Semantische Sprünge leicht bestrafen (Dämpfung)
+          new_score = score * sim * 0.8, # Penalize semantic jumps slightly (damping)
           new_type = if(curr_type == 'start', 'semantic', if(curr_type == 'semantic', 'semantic', 'mixed'))
 
-        # Ergebnis aggregieren (Gruppierung nach ID und Type)
+        # Aggregate result (Grouping by ID and Type)
         ?[id, min_depth, max_score, type] := 
           path[id, d, s, type],
           id != $startId,
@@ -257,13 +257,13 @@ export class InferenceEngine {
         minSim: minSimilarity
       });
 
-      // Post-Processing in JS: Beste Pfad-Typ pro ID auswählen
+      // Post-processing in JS: Select best path type per ID
       const bestPaths = new Map<string, any>();
       
       for (const row of res.rows) {
         const [id, depth, score, type] = row;
         
-        // Cozo gibt manchmal Arrays zurück oder rohe Werte, sicherstellen dass wir Strings/Numbers haben
+        // Cozo sometimes returns arrays or raw values, ensure we have Strings/Numbers
         const cleanId = String(id);
         const cleanDepth = Number(depth);
         const cleanScore = Number(score);
@@ -287,9 +287,9 @@ export class InferenceEngine {
   }
 
   /**
-   * Analysiert die Cluster-Struktur direkt auf dem HNSW-Graphen (Layer 0).
-   * Dies ist extrem schnell, da keine Vektor-Berechnungen (K-Means) nötig sind,
-   * sondern die bereits indizierte Nachbarschafts-Topologie genutzt wird.
+   * Analyzes the cluster structure directly on the HNSW graph (Layer 0).
+   * This is extremely fast because no vector calculations (K-Means) are necessary,
+   * but the already indexed neighborhood topology is used.
    */
   async analyzeHnswClusters(): Promise<{ 
     cluster_id: number; 
@@ -298,24 +298,24 @@ export class InferenceEngine {
   }[]> {
     try {
       const query = `
-        # 1. Extrahiere Kanten aus HNSW Layer 0 (Basis-Layer)
-        # Wir nutzen ungewichtete Kanten (weight=1.0) für reine Topologie-Analyse
+        # 1. Extract edges from HNSW Layer 0 (Base Layer)
+        # We use unweighted edges (weight=1.0) for pure topology analysis
         hnsw_edges[from, to, weight] := 
             *entity:semantic{layer: 0, fr_id: from, to_id: to},
             from != to,
             weight = 1.0
 
-        # 2. Führe Label Propagation auf dem HNSW-Graphen aus
-        # Dies findet natürliche Dichte-Cluster im Vektorraum
+        # 2. Run Label Propagation on the HNSW graph
+        # This finds natural density clusters in the vector space
         communities[cluster_id, node_id] <~ LabelPropagation(hnsw_edges[from, to, weight])
 
-        # 3. Hole Namen für die Knoten
+        # 3. Get names for the nodes
         cluster_nodes[cluster_id, name] :=
             communities[cluster_id, node_id],
             *entity{id: node_id, name, @ "NOW"}
         
-        # 4. Aggregiere Ergebnisse: Größe und Beispiele pro Cluster
-        # Wir holen die rohen Daten und aggregieren in JS, um String-Aggregations-Probleme zu vermeiden
+        # 4. Aggregate results: size and examples per cluster
+        # We get the raw data and aggregate in JS to avoid string aggregation problems
         ?[cluster_id, name] :=
             cluster_nodes[cluster_id, name]
       `;
@@ -346,7 +346,7 @@ export class InferenceEngine {
         examples: data.examples
       }));
 
-      // Sortiere nach Cluster-Größe absteigend
+      // Sort by cluster size descending
       return clusters.sort((a, b) => b.size - a.size);
 
     } catch (e: any) {

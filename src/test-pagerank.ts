@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 async function testPageRank() {
   const server = new MemoryServer('test_pagerank');
   
-  console.log("--- Erstelle Entitäten ---");
+  console.log("--- Creating Entities ---");
   
   const idA = "entity_a";
   const idB = "entity_b";
@@ -23,11 +23,11 @@ async function testPageRank() {
     ]
   });
 
-  console.log("--- Berechne PageRank ---");
+  console.log("--- Calculating PageRank ---");
   const rankRes = await server.recomputePageRank();
   console.log("Ranks:", JSON.stringify(rankRes, null, 2));
 
-  console.log("--- Suche nach 'Knoten' (A sollte durch PageRank geboostet sein) ---");
+  console.log("--- Searching for 'Node' (A should be boosted by PageRank) ---");
   const searchRes = await server.advancedSearch({ query: 'Knoten', limit: 5 });
   
   console.log("Suchergebnisse:");

@@ -55,7 +55,7 @@ export interface HybridSearchOptions {
    private db: CozoDb;
    private embeddingService: EmbeddingService;
    private searchCache = new Map<string, { results: SearchResult[]; timestamp: number }>();
-   private readonly CACHE_TTL = 300000; // 5 Minuten Cache
+   private readonly CACHE_TTL = 300000; // 5 minutes cache
  
    constructor(db: CozoDb, embeddingService: EmbeddingService) {
      this.db = db;
@@ -81,7 +81,7 @@ export interface HybridSearchOptions {
      const cacheKey = this.getCacheKey(options);
     const cached = this.searchCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < this.CACHE_TTL)) {
-      console.error(`[HybridSearch] In-Memory Cache-Treffer für Key: ${cacheKey}`);
+      console.error(`[HybridSearch] In-Memory cache hit for key: ${cacheKey}`);
       return cached.results;
     }
 
@@ -91,13 +91,13 @@ export interface HybridSearchOptions {
         { hash: cacheKey, min_ts: Math.floor((Date.now() - this.CACHE_TTL) / 1000) }
       );
       if (exactRes.rows.length > 0) {
-        console.error(`[HybridSearch] DB Cache-Treffer für Key: ${cacheKey}`);
+        console.error(`[HybridSearch] DB cache hit for key: ${cacheKey}`);
         const results = exactRes.rows[0][0] as SearchResult[];
         this.searchCache.set(cacheKey, { results, timestamp: Date.now() });
         return results;
       }
     } catch (e: any) {
-      console.error(`[HybridSearch] Cache-Lookup Fehler oder Tabelle fehlt: ${e.message}`);
+      console.error(`[HybridSearch] Cache lookup error or table missing: ${e.message}`);
     }
 
     return null;
@@ -122,7 +122,7 @@ export interface HybridSearchOptions {
       if (r.created_at) {
         const createdAt = Array.isArray(r.created_at) ? r.created_at[0] : r.created_at;
         const ageHours = (Date.now() - Number(createdAt) / 1000) / (1000 * 60 * 60);
-        const decay = Math.pow(0.5, ageHours / (24 * 90)); // 90 Tage Halbwertszeit
+        const decay = Math.pow(0.5, ageHours / (24 * 90)); // 90 days half-life
         
         let newScore = score * decay;
         if (isNaN(newScore)) newScore = 0;
@@ -134,7 +134,7 @@ export interface HybridSearchOptions {
   }
  
    async advancedSearch(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
-    console.error("[HybridSearch] Starte advancedSearch mit Optionen:", JSON.stringify(options, null, 2));
+    console.error("[HybridSearch] Starting advancedSearch with options:", JSON.stringify(options, null, 2));
     const { query, limit = 10, filters, graphConstraints, vectorParams } = options;
     
     let queryEmbedding: number[];
@@ -147,17 +147,17 @@ export interface HybridSearchOptions {
 
     const cachedResults = await this.tryCacheLookup(options, queryEmbedding);
     if (cachedResults !== null) {
-      console.error("[HybridSearch] Cache-Treffer für advancedSearch");
+      console.error("[HybridSearch] Cache hit for advancedSearch");
       return cachedResults;
     }
-    console.error("[HybridSearch] Cache-Miss, führe Datalog-Abfrage aus...");
- 
-     let topk = limit * 2;
+    console.error("[HybridSearch] Cache miss, executing Datalog query...");
+
+    let topk = limit * 2;
     const hasFilters = (filters?.metadata && Object.keys(filters.metadata).length > 0) || 
                        (filters?.entityTypes && filters.entityTypes.length > 0);
                        
     if (hasFilters) {
-      // Erhöhe topk signifikant für Post-Filtering
+      // Significantly increase topk for post-filtering
       topk = Math.max(limit * 20, 200);
     }
 
@@ -183,11 +183,11 @@ export interface HybridSearchOptions {
 
     if (filters?.entityTypes && filters.entityTypes.length > 0) {
       params.allowed_types = filters.entityTypes;
-      // Post-Filtering für Typen
+      // Post-filtering for types
       metaJoins.push(`is_in(type, $allowed_types)`);
     }
 
-    // Nutze gefilterte Indizes wenn möglich (v1.7)
+    // Use filtered indexes if possible (v1.7)
     let indexToUse = "entity:semantic";
     if (filters?.entityTypes && filters.entityTypes.length === 1) {
       const requestedType = filters.entityTypes[0].toLowerCase();
@@ -197,12 +197,12 @@ export interface HybridSearchOptions {
       }
     }
 
-    // Multi-Vector Support: Nutze name_embedding wenn die Query kurz ist (v1.7)
+    // Multi-Vector Support: Use name_embedding if query is short (v1.7)
     let indexToSearch = indexToUse;
     const isShortQuery = query.split(' ').length <= 3;
     
     if (isShortQuery && !filters?.entityTypes) {
-      // Für kurze Queries ohne Typ-Filter ist der name_semantic Index oft präziser
+      // For short queries without type filter, the name_semantic index is often more precise
       indexToSearch = "entity:name_semantic";
     }
 
@@ -283,13 +283,13 @@ export interface HybridSearchOptions {
         source: "advanced_hybrid",
       }));
 
-      // Post-Filtering für Zeitbereich
+      // Post-Filtering for Time Range
       if (options.timeRangeHours) {
         const minTs = Date.now() - (options.timeRangeHours * 3600 * 1000);
         searchResults = searchResults.filter(r => (r.created_at || 0) > minTs);
       }
  
-       // Post-Filtering für Metadaten (da CozoDB get() im Datalog oft fehlschlägt)
+       // Post-Filtering for Metadata (since CozoDB get() in Datalog often fails)
       if (filters?.metadata) {
         searchResults = searchResults.filter(r => {
           if (!r.metadata || typeof r.metadata !== 'object') return false;
@@ -301,7 +301,7 @@ export interface HybridSearchOptions {
        await this.updateCache(options, queryEmbedding, finalResults);
        return finalResults;
      } catch (e: any) {
-       console.error("[HybridSearch] Fehler bei advancedSearch:", e.message);
+       console.error("[HybridSearch] Error in advancedSearch:", e.message);
        return this.search(options);
      }
    }
@@ -327,7 +327,7 @@ export interface HybridSearchOptions {
    }
  
    async graphRag(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
-    console.error("[HybridSearch] Starte graphRag mit Optionen:", JSON.stringify(options, null, 2));
+    console.error("[HybridSearch] Starting graphRag with options:", JSON.stringify(options, null, 2));
     const { query, limit = 5, filters, graphConstraints } = options;
     const maxDepth = graphConstraints?.maxDepth || 2;
     const queryEmbedding = await this.embeddingService.embed(query);
@@ -369,11 +369,11 @@ export interface HybridSearchOptions {
       params.min_ts = minTs;
     }
 
-     // Datalog Query für Graph-RAG:
-    // 1. Finde Seed-Entitäten via Vektorsuche (mit Inline-Filtering)
-    // 2. Exploriere den Graphen ausgehend von den Seeds bis zu maxDepth Hops
-    // 3. Sammle alle erreichten Entitäten und Observations
-    // 4. Berechne einen kombinierten Score basierend auf Vektor-Distanz, Graph-Distanz und PageRank
+     // Datalog Query for Graph-RAG:
+    // 1. Find seed entities via vector search (with inline filtering)
+    // 2. Explore the graph starting from seeds up to maxDepth hops
+    // 3. Collect all reached entities and observations
+    // 4. Calculate a combined score based on vector distance, graph distance, and PageRank
     const datalogQuery = `
       rank_val[id, r] := *entity_rank{entity_id: id, pagerank: r}
       rank_val[id, r] := *entity{id, @ "NOW"}, not *entity_rank{entity_id: id}, r = 0.0
@@ -407,17 +407,17 @@ export interface HybridSearchOptions {
         text: r[7] || undefined,
         explanation: {
           source_score: r[5],
-          details: `Gefunden via Graph-Expansion (Quelle: ${r[6]})`
+          details: `Found via graph expansion (Source: ${r[6]})`
         }
       }));
 
-      // Post-Filtering für Zeitbereich
+      // Post-filtering for time range
       if (options.timeRangeHours) {
         const minTs = Date.now() - (options.timeRangeHours * 3600 * 1000);
         searchResults = searchResults.filter(r => (r.created_at || 0) > minTs);
       }
 
-      // Post-Filtering für Metadaten
+      // Post-filtering for metadata
       if (filters?.metadata) {
         searchResults = searchResults.filter(r => {
           if (!r.metadata || typeof r.metadata !== 'object') return false;
@@ -427,8 +427,8 @@ export interface HybridSearchOptions {
 
       return this.applyTimeDecay(searchResults);
     } catch (e: any) {
-      console.error("[HybridSearch] Fehler bei graphRag:", e.message);
-      // Fallback auf normale Suche bei Fehler
+      console.error("[HybridSearch] Error in graphRag:", e.message);
+      // Fallback to normal search on error
       return this.search(options);
     }
   }

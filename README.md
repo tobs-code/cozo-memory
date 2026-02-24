@@ -136,12 +136,6 @@ This tool (`src/benchmark.ts`) performs the following tests:
 └───────────────────────────┘
 ```
 
-Optional (for UI):
-
-```
-Web UI (Vite/React) ──HTTP──► API Bridge (Express) ─► MemoryServer (embedded)
-```
-
 ## Installation
 
 ### Prerequisites
@@ -465,11 +459,11 @@ Inference uses multiple strategies (non-persisting):
 - **Expertise Rule**: `Person` + `works_on` + `uses_tech` ⇒ `expert_in` (confidence 0.7)
 - **Query-Triggered Expertise**: Search queries with keywords like `expert`, `skill`, `knowledge`, `competence` automatically trigger a dedicated expert search over the graph network.
 
-## Optional: HTTP API Bridge + Web UI
+## Optional: HTTP API Bridge
 
 ### API Bridge
 
-For UI/Tools, there is an Express server embedding the `MemoryServer` directly.
+For Tools, there is an Express server embedding the `MemoryServer` directly.
 
 Start:
 

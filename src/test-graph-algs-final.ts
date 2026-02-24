@@ -4,12 +4,12 @@ import { MemoryServer } from './index';
 async function testNewGraphAlgorithms() {
   const server = new MemoryServer('test_graph_algorithms');
   
-  console.log("--- Initialisiere Test-Daten ---");
+  console.log("--- Initialize test data ---");
   
-  // Wir bauen ein Netzwerk:
-  // A <-> B <-> C (B ist Brücke/Betweenness)
-  // D -> E -> F -> D (Zyklus für CC und HITS)
-  // G, H (Separate Komponente)
+  // We build a network:
+  // A <-> B <-> C (B is bridge/betweenness)
+  // D -> E -> F -> D (Cycle for CC and HITS)
+  // G, H (Separate component)
   
   const entities = [
     { id: 'node_a', name: 'Node A', type: 'Test' },
@@ -31,32 +31,32 @@ async function testNewGraphAlgorithms() {
     { from_id: 'node_g', to_id: 'node_h', action: 'create_relation', params: { from_id: 'node_g', to_id: 'node_h', relation_type: 'link', strength: 0.5 } }
   ];
 
-  console.log("Erstelle Entitäten...");
+  console.log("Creating entities...");
   for (const ent of entities) {
     await server.runTransaction({
       operations: [{ action: 'create_entity', params: ent }]
     });
   }
   
-  console.log("Erstelle Beziehungen...");
+  console.log("Creating relationships...");
   await server.runTransaction({
     operations: relations.map(r => ({ action: 'create_relation', params: r.params }))
   });
 
-  // Kurze Pause für DB-Flush (SQLite ist synchron, aber sicher ist sicher)
+  // Short pause for DB flush (SQLite is synchronous, but better safe than sorry)
   await new Promise(resolve => setTimeout(resolve, 500));
 
-  // DEBUG: Prüfen ob Daten da sind
-  console.log("Debug: Prüfe Datenbank-Inhalt...");
+  // DEBUG: Check if data is present
+  console.log("Debug: Checking database content...");
   const entitiesCount = await server.db.run(`?[count(e)] := *entity{id: e}`);
   const relationsCount = await server.db.run(`?[count(f)] := *relationship{from_id: f, @ "NOW"}`);
-  console.log(`Debug: Entitäten in DB: ${entitiesCount.rows[0][0]}`);
-  console.log(`Debug: Beziehungen in DB: ${relationsCount.rows[0][0]}`);
+  console.log(`Debug: Entities in DB: ${entitiesCount.rows[0][0]}`);
+  console.log(`Debug: Relationships in DB: ${relationsCount.rows[0][0]}`);
 
   if (relationsCount.rows[0][0] === 0) {
-    console.log("Versuche alternative Abfrage ohne @ NOW...");
+    console.log("Trying alternative query without @ NOW...");
     const relationsCountNoNow = await server.db.run(`?[count(f)] := *relationship{from_id: f}`);
-    console.log(`Debug: Beziehungen in DB (ohne NOW): ${relationsCountNoNow.rows[0][0]}`);
+    console.log(`Debug: Relationships in DB (without NOW): ${relationsCountNoNow.rows[0][0]}`);
   }
 
   console.log("\n--- Test: Betweenness Centrality ---");
@@ -80,7 +80,7 @@ async function testNewGraphAlgorithms() {
   console.log("PageRank Results (Top 5):", JSON.stringify(pagerank.sort((a: any, b: any) => b.pagerank - a.pagerank).slice(0, 5), null, 2));
 
   console.log("\n--- Test: MCP Tool 'analyze_graph' ---");
-  // Wir simulieren MCP Aufrufe via Server-Methoden, da FastMCP Tools intern gekapselt sind
+  // We simulate MCP calls via server methods, since FastMCP tools are encapsulated internally
   console.log("Testing analyze_graph with action 'betweenness'...");
   const resB = await server.recomputeBetweennessCentrality();
   console.log("Result (Top 5):", JSON.stringify(resB.sort((a: any, b: any) => b.centrality - a.centrality).slice(0, 5), null, 2));

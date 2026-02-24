@@ -1,22 +1,22 @@
 
 import { AutoTokenizer, env } from "@xenova/transformers";
-import * as ort from 'onnxruntime-node';
+const ort = require('onnxruntime-node');
 import * as path from 'path';
 import * as fs from 'fs';
 
-// Robuster Pfad zum Projekt-Root
+// Robust path to project root
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const CACHE_DIR = path.resolve(PROJECT_ROOT, '.cache');
 env.cacheDir = CACHE_DIR;
 env.allowLocalModels = true;
 
-// Einfache LRU Cache Implementierung
+// Simple LRU Cache Implementation
 class LRUCache<T> {
   private cache = new Map<string, { value: T; timestamp: number }>();
   private maxSize: number;
   private ttl: number;
 
-  constructor(maxSize: number = 1000, ttlMs: number = 3600000) { // 1 Stunde TTL
+  constructor(maxSize: number = 1000, ttlMs: number = 3600000) { // 1 hour TTL
     this.maxSize = maxSize;
     this.ttl = ttlMs;
   }
@@ -25,7 +25,7 @@ class LRUCache<T> {
     const entry = this.cache.get(key);
     if (!entry) return undefined;
 
-    // Prüfe TTL
+    // Check TTL
     if (Date.now() - entry.timestamp > this.ttl) {
       this.cache.delete(key);
       return undefined;
@@ -38,11 +38,11 @@ class LRUCache<T> {
   }
 
   set(key: string, value: T): void {
-    // Wenn Key bereits existiert, entferne alte Position
+    // If key already exists, remove old position
     if (this.cache.has(key)) {
       this.cache.delete(key);
     }
-    // Wenn Cache voll ist, entferne ältesten Eintrag
+    // If cache is full, remove oldest entry
     else if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
@@ -64,17 +64,17 @@ class LRUCache<T> {
 
 export class EmbeddingService {
   private cache: LRUCache<number[]>;
-  private session: ort.InferenceSession | null = null;
+  private session: any | null = null;
   private tokenizer: any = null;
-  private readonly modelId: string = "Xenova/bge-m3";
-  private readonly dimensions: number = 1024;
+  private readonly modelId: string = "Xenova/all-MiniLM-L6-v2";
+  private readonly dimensions: number = 384;
   private queue: Promise<any> = Promise.resolve();
 
   constructor() {
-    this.cache = new LRUCache<number[]>(1000, 3600000); // 1000 Einträge, 1h TTL
+    this.cache = new LRUCache<number[]>(1000, 3600000); // 1000 entries, 1h TTL
   }
 
-  // Serialisiert die Ausführung von Embeddings, um Event-Loop-Blockaden zu vermeiden
+  // Serializes embedding execution to avoid event loop blocking
   private async runSerialized<T>(task: () => Promise<T>): Promise<T> {
     // Chain the task to the queue
     const res = this.queue.then(() => task());
@@ -87,15 +87,15 @@ export class EmbeddingService {
     if (this.session && this.tokenizer) return;
 
     try {
-      // 1. Tokenizer laden
+      // 1. Load Tokenizer
       if (!this.tokenizer) {
           this.tokenizer = await AutoTokenizer.from_pretrained(this.modelId);
       }
 
-      // 2. Modell-Pfad ermitteln
+      // 2. Determine model path
       const baseDir = path.join(env.cacheDir, 'Xenova', 'bge-m3', 'onnx');
       
-      // Priorität: FP32 (model.onnx) > Quantized (model_quantized.onnx)
+      // Priority: FP32 (model.onnx) > Quantized (model_quantized.onnx)
       let modelPath = path.join(baseDir, 'model.onnx');
       
       if (!fs.existsSync(modelPath)) {
@@ -103,13 +103,13 @@ export class EmbeddingService {
       }
 
       if (!fs.existsSync(modelPath)) {
-        throw new Error(`Modell-Datei nicht gefunden unter: ${modelPath}`);
+        throw new Error(`Model file not found at: ${modelPath}`);
       }
 
-      // 3. Session erstellen
+      // 3. Create Session
       if (!this.session) {
-          const options: ort.InferenceSession.SessionOptions = {
-            executionProviders: ['dml', 'cpu'], // DirectML first
+          const options: any = {
+            executionProviders: ['cpu'], // Use CPU backend to avoid native conflicts
             graphOptimizationLevel: 'all'
           };
 
@@ -117,7 +117,7 @@ export class EmbeddingService {
       }
 
     } catch (err: any) {
-      console.error("[EmbeddingService] Kritischer Fehler bei Initialisierung:", err);
+      console.error("[EmbeddingService] Critical initialization error:", err);
       throw err;
     }
   }
@@ -134,13 +134,13 @@ export class EmbeddingService {
 
       try {
         await this.init();
-        if (!this.session || !this.tokenizer) throw new Error("Session/Tokenizer nicht initialisiert");
+        if (!this.session || !this.tokenizer) throw new Error("Session/Tokenizer not initialized");
 
         // 2. Tokenization
         const model_inputs = await this.tokenizer(textStr, { padding: true, truncation: true });
         
         // 3. Tensor Creation
-        const feeds: Record<string, ort.Tensor> = {};
+        const feeds: Record<string, any> = {};
         let attentionMaskData: BigInt64Array | null = null;
 
         for (const [key, value] of Object.entries(model_inputs)) {
@@ -155,7 +155,7 @@ export class EmbeddingService {
                     attentionMaskData = data;
                 }
 
-                feeds[key] = new ort.Tensor('int64', data, dims);
+                feeds[key] = new (ort as any).Tensor('int64', data, dims);
             }
         }
 
@@ -170,7 +170,7 @@ export class EmbeddingService {
         
         // Ensure we have data
         if (!outputTensor || !attentionMaskData) {
-            throw new Error("Keine Output-Daten oder Attention Mask vorhanden");
+            throw new Error("No output data or attention mask available");
         }
 
         const embedding = this.meanPooling(
@@ -186,7 +186,7 @@ export class EmbeddingService {
         return normalized;
 
       } catch (error: any) {
-        console.error(`[EmbeddingService] Fehler bei Embedding für "${textStr.substring(0, 20)}...":`, error?.message || error);
+        console.error(`[EmbeddingService] Error embedding "${textStr.substring(0, 20)}...":`, error?.message || error);
         return new Array(this.dimensions).fill(0);
       }
     });
@@ -240,7 +240,7 @@ export class EmbeddingService {
       return vector.map(v => v / norm);
   }
 
-  // Cache-Statistiken
+  // Cache Statistics
   getCacheStats() {
     return {
       size: this.cache.size(),
@@ -250,7 +250,7 @@ export class EmbeddingService {
     };
   }
 
-  // Cache leeren
+  // Clear Cache
   clearCache(): void {
     this.cache.clear();
   }

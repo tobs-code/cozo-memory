@@ -1,14 +1,14 @@
 import { EmbeddingService } from "./embedding-service";
 
 async function checkGpu() {
-  console.log("Starte Embedding-Test...");
+  console.log("Starting Embedding Test...");
   try {
     const service = new EmbeddingService();
-    // Embedding eines Dummy-Textes, um die Initialisierung zu triggern
+    // Embedding a dummy text to trigger initialization
     await service.embed("Test Embedding");
-    console.log("Embedding erfolgreich abgeschlossen.");
+    console.log("Embedding successfully completed.");
   } catch (error) {
-    console.error("Fehler beim Embedding:", error);
+    console.error("Error during embedding:", error);
   }
 }
 

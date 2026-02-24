@@ -1,19 +1,20 @@
+import { EmbeddingService } from "./embedding-service";
+
 import { FastMCP } from "fastmcp";
 import { CozoDb } from "cozo-node";
 import { z } from "zod";
 import { v4 as uuidv4, validate as uuidValidate } from "uuid";
 import path from "path";
-import { EmbeddingService } from "./embedding-service";
 import { HybridSearch } from "./hybrid-search";
 import { InferenceEngine } from "./inference-engine";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
-const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" oder "rocksdb"
+const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
 const EMBEDDING_MODEL = "Xenova/bge-m3";
 const EMBEDDING_DIM = 1024;
 
 export const USER_ENTITY_ID = "global_user_profile";
-export const USER_ENTITY_NAME = "Der Benutzer";
+export const USER_ENTITY_NAME = "The User";
 export const USER_ENTITY_TYPE = "User";
 
 export class MemoryServer {
@@ -27,7 +28,7 @@ export class MemoryServer {
   constructor(dbPath: string = DB_PATH) {
     const fullDbPath = DB_ENGINE === "sqlite" ? dbPath + ".db" : dbPath;
     this.db = new CozoDb(DB_ENGINE, fullDbPath);
-    console.error(`[DB] Verwende Backend: ${DB_ENGINE}, Pfad: ${fullDbPath}`);
+    console.error(`[DB] Using backend: ${DB_ENGINE}, path: ${fullDbPath}`);
     this.embeddingService = new EmbeddingService();
     this.hybridSearch = new HybridSearch(this.db, this.embeddingService);
     this.inferenceEngine = new InferenceEngine(this.db, this.embeddingService);
@@ -39,7 +40,7 @@ export class MemoryServer {
 
     this.initPromise = (async () => {
       await this.setupSchema();
-      console.error("[Server] Schema Setup vollständig abgeschlossen.");
+      console.error("[Server] Schema setup fully completed.");
     })();
     this.registerTools();
   }
@@ -109,30 +110,30 @@ export class MemoryServer {
       byEntity.set(p.entity_id, arr);
     }
 
-    // Cache-Bereinigung IMMER durchführen, unabhängig von Observation-Kandidaten
+    // Always perform cache cleanup, regardless of observation candidates
     const cutoff = Math.floor((Date.now() - olderThanDays * 24 * 3600 * 1000) / 1000);
-    console.error(`[Janitor] Bereinige Cache (älter als ${new Date(cutoff * 1000).toISOString()}, ts=${cutoff})...`);
+    console.error(`[Janitor] Cleaning cache (older than ${new Date(cutoff * 1000).toISOString()}, ts=${cutoff})...`);
     
     let cacheDeletedCount = 0;
     try {
-      // Zuerst zählen, was wir löschen wollen
+      // First count what we want to delete
       const toDeleteRes = await this.db.run(`?[query_hash] := *search_cache{query_hash, created_at}, created_at < $cutoff`, { cutoff });
       const toDeleteHashes = toDeleteRes.rows.map((r: any) => [r[0]]);
        
        if (toDeleteHashes.length > 0) {
-         console.error(`[Janitor] Lösche ${toDeleteHashes.length} Cache-Einträge...`);
-         // Wir nutzen :delete mit den Hashes (als Liste von Listen)
+         console.error(`[Janitor] Deleting ${toDeleteHashes.length} cache entries...`);
+         // We use :delete with the hashes (as a list of lists)
          const deleteRes = await this.db.run(`
            ?[query_hash] <- $hashes
            :delete search_cache {query_hash}
          `, { hashes: toDeleteHashes });
-        console.error(`[Janitor] :delete Ergebnis:`, JSON.stringify(deleteRes));
+        console.error(`[Janitor] :delete result:`, JSON.stringify(deleteRes));
         cacheDeletedCount = toDeleteHashes.length;
       } else {
-        console.error(`[Janitor] Keine veralteten Cache-Einträge gefunden.`);
+        console.error(`[Janitor] No obsolete cache entries found.`);
       }
     } catch (e: any) {
-      console.error(`[Janitor] Cache-Bereinigung Fehler:`, e.message);
+      console.error(`[Janitor] Cache cleanup error:`, e.message);
     }
 
     if (picked.length === 0) {
@@ -174,7 +175,7 @@ export class MemoryServer {
     });
 
     const summary_entity_id = (summaryEntity as any)?.id as string | undefined;
-    if (!summary_entity_id) return { error: "Konnte Summary-Entität nicht erstellen" };
+    if (!summary_entity_id) return { error: "Could not create summary entity" };
 
     const results: any[] = [];
 
@@ -196,10 +197,10 @@ export class MemoryServer {
       const maxTs = obs.reduce((m, o) => Math.max(m, o.ts), Number.NEGATIVE_INFINITY);
 
       const systemPrompt =
-        "Hier sind ältere Fragmente (oder frühere Zusammenfassungen) aus deinem Gedächtnis. Fasse sie zu einer einzigen, dauerhaften Executive Summary zusammen. Antworte nur mit der Executive Summary.";
+        "Here are older fragments (or previous summaries) from your memory. Summarize them into a single, permanent Executive Summary. Respond only with the Executive Summary.";
 
       const userPrompt =
-        `Entität: ${entityName} (${entityType})\nLevel: ${nextLevel}\n\nFragmente:\n` + obs.map((o) => `- ${o.text}`).join("\n");
+        `Entity: ${entityName} (${entityType})\nLevel: ${nextLevel}\n\nFragments:\n` + obs.map((o) => `- ${o.text}`).join("\n");
 
       let summaryText: string;
       try {
@@ -215,11 +216,11 @@ export class MemoryServer {
         summaryText = (response as any)?.message?.content?.trim?.() ?? "";
       } catch (e: any) {
         console.warn(`[Janitor] Ollama error for ${entityName}: ${e.message}. Using fallback concatenation.`);
-        summaryText = "Zusammenfassung (Fallback): " + obs.map(o => o.text).join("; ");
+        summaryText = "Summary (Fallback): " + obs.map(o => o.text).join("; ");
       }
 
       if (!summaryText || summaryText.trim() === "" || summaryText.trim().toUpperCase() === "DELETE") {
-        summaryText = "Zusammenfassung (Fallback): " + obs.map((o) => o.text).join("; ");
+        summaryText = "Summary (Fallback): " + obs.map((o) => o.text).join("; ");
       }
 
       let executiveSummaryEntityId: string | null = null;
@@ -346,7 +347,7 @@ export class MemoryServer {
     const hasEdges = edgeCheckRes.rows.length > 0;
 
     if (!hasEdges) {
-      console.error("[Communities] Keine Beziehungen gefunden, überspringe LabelPropagation.");
+      console.error("[Communities] No relationships found, skipping LabelPropagation.");
       return [];
     }
 
@@ -375,7 +376,7 @@ export class MemoryServer {
 
     const edgeCheckRes = await this.db.run(`?[from_id] := *relationship{from_id, @ "NOW"} :limit 1`);
     if (edgeCheckRes.rows.length === 0) {
-      console.error("[Betweenness] Keine Beziehungen gefunden, überspringe Betweenness Centrality.");
+      console.error("[Betweenness] No relationships found, skipping Betweenness Centrality.");
       return [];
     }
 
@@ -387,10 +388,10 @@ export class MemoryServer {
 
     try {
       const result = await this.db.run(query);
-      console.error(`[Betweenness] ${result.rows.length} Entitäten berechnet.`);
+      console.error(`[Betweenness] ${result.rows.length} entities calculated.`);
       return result.rows.map((r: any) => ({ entity_id: String(r[0]), centrality: Number(r[1]) }));
     } catch (e: any) {
-      console.error("[Betweenness] Fehler bei Berechnung:", e.message);
+      console.error("[Betweenness] Error during calculation:", e.message);
       return [];
     }
   }
@@ -400,7 +401,7 @@ export class MemoryServer {
 
     const edgeCheckRes = await this.db.run(`?[from_id] := *relationship{from_id, @ "NOW"} :limit 1`);
     if (edgeCheckRes.rows.length === 0) {
-      console.error("[ConnectedComponents] Keine Beziehungen gefunden.");
+      console.error("[ConnectedComponents] No relationships found.");
       return [];
     }
 
@@ -414,7 +415,7 @@ export class MemoryServer {
       const result = await this.db.run(query);
       return result.rows.map((r: any) => ({ entity_id: String(r[0]), component_id: String(r[1]) }));
     } catch (e: any) {
-      console.error("[ConnectedComponents] Fehler bei Berechnung:", e.message);
+      console.error("[ConnectedComponents] Calculation error:", e.message);
       return [];
     }
   }
@@ -437,7 +438,7 @@ export class MemoryServer {
         path: result.rows[0][3]
       };
     } catch (e: any) {
-      console.error("[ShortestPath] Fehler bei Berechnung:", e.message);
+      console.error("[ShortestPath] Calculation error:", e.message);
       return null;
     }
   }
@@ -463,7 +464,7 @@ export class MemoryServer {
       const result = await this.db.run(query.replace(/^\s+/gm, '').trim());
       return result.rows.map((r: any) => ({ entity_id: String(r[0]), authority: Number(r[1]), hub: Number(r[2]) }));
     } catch (e: any) {
-      console.error("[HITS] Fehler bei Berechnung:", e.message);
+      console.error("[HITS] Calculation error:", e.message);
       return [];
     }
   }
@@ -473,7 +474,7 @@ export class MemoryServer {
 
     const edgeCheckRes = await this.db.run(`?[from_id] := *relationship{from_id, @ "NOW"} :limit 1`);
     if (edgeCheckRes.rows.length === 0) {
-      console.error("[PageRank] Keine Beziehungen gefunden, überspringe PageRank.");
+      console.error("[PageRank] No relationships found, skipping PageRank.");
       return [];
     }
 
@@ -486,10 +487,10 @@ export class MemoryServer {
     try {
       const result = await this.db.run(query);
       
-      // Ergebnisse speichern
+      // Save results
       for (const row of result.rows as any[]) {
         const entity_id = String(row[0]);
-        const pagerank = Float64Array.from([row[1]])[0]; // Sicherstellen dass es ein float ist
+        const pagerank = Float64Array.from([row[1]])[0]; // Ensure it is a float
         await this.db.run(
           `?[entity_id, pagerank] <- [[$entity_id, $pagerank]]
            :put entity_rank {entity_id => pagerank}`,
@@ -497,28 +498,28 @@ export class MemoryServer {
         );
       }
       
-      console.error(`[PageRank] ${result.rows.length} Entitäten gerankt.`);
+      console.error(`[PageRank] ${result.rows.length} entities ranked.`);
       return result.rows.map((r: any) => ({ entity_id: String(r[0]), pagerank: Number(r[1]) }));
     } catch (e: any) {
-      console.error("[PageRank] Fehler bei Berechnung:", e.message);
+      console.error("[PageRank] Calculation error:", e.message);
       return [];
     }
   }
 
   private async setupSchema() {
     try {
-      console.error("[Schema] Initialisiere Schema...");
+      console.error("[Schema] Initializing schema...");
       
       const existingRelations = await this.db.run("::relations");
       const relations = existingRelations.rows.map((r: any) => r[0]);
 
-      // Entity Tabelle
+      // Entity Table
       if (!relations.includes("entity")) {
         try {
           await this.db.run(`{:create entity {id: String, created_at: Validity => name: String, type: String, embedding: <F32; ${EMBEDDING_DIM}>, name_embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}`);
-          console.error("[Schema] Entity Tabelle erstellt.");
+          console.error("[Schema] Entity table created.");
         } catch (e: any) {
-          console.error("[Schema] Entity Tabelle Fehler:", e.message);
+          console.error("[Schema] Entity table error:", e.message);
         }
       } else {
         const timeTravelReady = await this.isTimeTravelReady("entity");
@@ -554,50 +555,50 @@ export class MemoryServer {
                 created_at = [created_at_raw, true]
               :replace entity {id: String, created_at: Validity => name: String, type: String, embedding: <F32; ${EMBEDDING_DIM}>, name_embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}
             `);
-            console.error("[Schema] Entity Tabelle migriert (Validity).");
+            console.error("[Schema] Entity table migrated (Validity).");
           }
         }
       }
 
       try {
         await this.db.run(`{::hnsw create entity:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
-        console.error("[Schema] Entity HNSW Index erstellt.");
+        console.error("[Schema] Entity HNSW index created.");
       } catch (e: any) {
-        // Index Fehler ignorieren wir meistens, da ::hnsw create keinen einfachen Check hat
+        // We mostly ignore index errors, as ::hnsw create has no simple check
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Entity Index Hinweis:", e.message);
+            console.error("[Schema] Entity index notice:", e.message);
         }
       }
 
       try {
         await this.db.run(`{::hnsw create entity:name_semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [name_embedding], distance: Cosine, ef_construction: 200}}`);
-        console.error("[Schema] Entity Name-HNSW Index erstellt.");
+        console.error("[Schema] Entity Name-HNSW index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Entity Name-Index Hinweis:", e.message);
+            console.error("[Schema] Entity name-index notice:", e.message);
         }
       }
 
-      // Gefilterte HNSW Indizes für häufige Typen (v1.7)
+      // Filtered HNSW indices for common types (v1.7)
       const commonTypes = ['Person', 'Project', 'Task', 'Note'];
       for (const type of commonTypes) {
         try {
           await this.db.run(`{::hnsw create entity:semantic_${type.toLowerCase()} {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200, filter: type == '${type}'}}`);
-          console.error(`[Schema] Entity HNSW Index für ${type} erstellt.`);
+          console.error(`[Schema] Entity HNSW index for ${type} created.`);
         } catch (e: any) {
           if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-              console.error(`[Schema] Entity Index (${type}) Hinweis:`, e.message);
+              console.error(`[Schema] Entity index (${type}) notice:`, e.message);
           }
         }
       }
 
-      // Observation Tabelle
+      // Observation Table
       if (!relations.includes("observation")) {
         try {
           await this.db.run(`{:create observation {id: String, created_at: Validity => entity_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}`);
-          console.error("[Schema] Observation Tabelle erstellt.");
+          console.error("[Schema] Observation table created.");
         } catch (e: any) {
-          console.error("[Schema] Observation Tabelle Fehler:", e.message);
+          console.error("[Schema] Observation table error:", e.message);
         }
       } else {
         const timeTravelReady = await this.isTimeTravelReady("observation");
@@ -613,32 +614,32 @@ export class MemoryServer {
               created_at = [created_at_raw, true]
             :replace observation {id: String, created_at: Validity => entity_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}
           `);
-          console.error("[Schema] Observation Tabelle migriert (Validity).");
+          console.error("[Schema] Observation table migrated (Validity).");
         }
       }
       
       try {
         await this.db.run(`{::hnsw create observation:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
-        console.error("[Schema] Observation HNSW Index erstellt.");
+        console.error("[Schema] Observation HNSW index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Observation Index Hinweis:", e.message);
+            console.error("[Schema] Observation index notice:", e.message);
         }
       }
 
-      // FTS Indizes (v0.7 Feature)
+      // FTS Indices (v0.7 Feature)
       try {
         await this.db.run(`
           ::fts create entity:fts {
             extractor: name,
             tokenizer: Simple,
-            filters: [Lowercase, Stemmer('german'), Stopwords('de')]
+            filters: [Lowercase, Stemmer('english'), Stopwords('en')]
           }
         `);
-        console.error("[Schema] Entity FTS Index erstellt.");
+        console.error("[Schema] Entity FTS index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists")) {
-          console.error("[Schema] Entity FTS Fehler:", e.message);
+          console.error("[Schema] Entity FTS error:", e.message);
         }
       }
 
@@ -647,13 +648,13 @@ export class MemoryServer {
           ::fts create observation:fts {
             extractor: text,
             tokenizer: Simple,
-            filters: [Lowercase, Stemmer('german'), Stopwords('de')]
+            filters: [Lowercase, Stemmer('english'), Stopwords('en')]
           }
         `);
-        console.error("[Schema] Observation FTS Index erstellt.");
+        console.error("[Schema] Observation FTS index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists")) {
-          console.error("[Schema] Observation FTS Fehler:", e.message);
+          console.error("[Schema] Observation FTS error:", e.message);
         }
       }
 
@@ -668,33 +669,33 @@ export class MemoryServer {
             target_threshold: 0.5
           }
         `);
-        console.error("[Schema] Observation LSH Index erstellt.");
+        console.error("[Schema] Observation LSH index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists")) {
-          console.error("[Schema] Observation LSH Fehler:", e.message);
+          console.error("[Schema] Observation LSH error:", e.message);
         }
       }
 
-      // Semantic Cache Tabelle (v0.8+)
+      // Semantic Cache Table (v0.8+)
       if (!relations.includes("search_cache")) {
         try {
           await this.db.run(`{:create search_cache {query_hash: String => query_text: String, results: Json, options: Json, embedding: <F32; ${EMBEDDING_DIM}>, created_at: Int}}`);
-          console.error("[Schema] Search Cache Tabelle erstellt.");
+          console.error("[Schema] Search Cache table created.");
           
           await this.db.run(`{::hnsw create search_cache:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
-          console.error("[Schema] Search Cache HNSW Index erstellt.");
+          console.error("[Schema] Search Cache HNSW index created.");
         } catch (e: any) {
-          console.error("[Schema] Search Cache Setup Fehler:", e.message);
+          console.error("[Schema] Search Cache setup error:", e.message);
         }
       }
 
-      // Relationship Tabelle
+      // Relationship Table
       if (!relations.includes("relationship")) {
         try {
           await this.db.run('{:create relationship {from_id: String, to_id: String, relation_type: String, created_at: Validity => strength: Float, metadata: Json}}');
-          console.error("[Schema] Relationship Tabelle erstellt.");
+          console.error("[Schema] Relationship table created.");
         } catch (e: any) {
-          console.error("[Schema] Relationship Tabelle Fehler:", e.message);
+          console.error("[Schema] Relationship table error:", e.message);
         }
       } else {
         const timeTravelReady = await this.isTimeTravelReady("relationship");
@@ -706,17 +707,17 @@ export class MemoryServer {
               created_at = [created_at_raw, true]
             :replace relationship {from_id: String, to_id: String, relation_type: String, created_at: Validity => strength: Float, metadata: Json}
           `);
-          console.error("[Schema] Relationship Tabelle migriert (Validity).");
+          console.error("[Schema] Relationship table migrated (Validity).");
         }
       }
 
-      // Entity Community Tabelle
+      // Entity Community Table
       if (!relations.includes("entity_community")) {
         try {
           await this.db.run('{:create entity_community {entity_id: String => community_id: String}}');
-          console.error("[Schema] Entity Community Tabelle erstellt.");
+          console.error("[Schema] Entity Community table created.");
         } catch (e: any) {
-          console.error("[Schema] Entity Community Tabelle Fehler:", e.message);
+          console.error("[Schema] Entity Community table error:", e.message);
         }
       } else {
         try {
@@ -725,54 +726,54 @@ export class MemoryServer {
               *entity_community{entity_id, community_id}
             :replace entity_community {entity_id: String => community_id: String}
           `);
-          console.error("[Schema] Entity Community Tabelle migriert (Key-Value).");
+          console.error("[Schema] Entity Community table migrated (Key-Value).");
         } catch (e: any) {
-          console.error("[Schema] Entity Community Migration Hinweis:", e.message);
+          console.error("[Schema] Entity Community migration notice:", e.message);
         }
       }
 
-      // Entity Rank Tabelle (PageRank Scores)
+      // Entity Rank Table (PageRank Scores)
       if (!relations.includes("entity_rank")) {
         try {
           await this.db.run('{:create entity_rank {entity_id: String => pagerank: Float}}');
-          console.error("[Schema] Entity Rank Tabelle erstellt.");
+          console.error("[Schema] Entity Rank table created.");
         } catch (e: any) {
-          console.error("[Schema] Entity Rank Tabelle Fehler:", e.message);
+          console.error("[Schema] Entity Rank table error:", e.message);
         }
       }
 
-      // Memory Snapshot Tabelle
+      // Memory Snapshot Table
       if (!relations.includes("memory_snapshot")) {
         try {
           await this.db.run('{:create memory_snapshot {snapshot_id => entity_count: Int, observation_count: Int, relation_count: Int, metadata: Json, created_at: Int}}');
-          console.error("[Schema] Snapshot Tabelle erstellt.");
+          console.error("[Schema] Snapshot table created.");
         } catch (e: any) {
-          console.error("[Schema] Snapshot Tabelle Fehler:", e.message);
+          console.error("[Schema] Snapshot table error:", e.message);
         }
       }
 
       if (!relations.includes("inference_rule")) {
         try {
           await this.db.run('{:create inference_rule {id: String => name: String, datalog: String, created_at: Int}}');
-          console.error("[Schema] Inference Rule Tabelle erstellt.");
+          console.error("[Schema] Inference Rule table created.");
         } catch (e: any) {
-          console.error("[Schema] Inference Rule Tabelle Fehler:", e.message);
+          console.error("[Schema] Inference Rule table error:", e.message);
         }
       } else {
-        // Migration: Prüfe ob created_at existiert
+        // Migration: Check if created_at exists
         try {
           const cols = await this.db.run('::columns inference_rule');
           const hasCreatedAt = cols.rows.some((r: any) => r[0] === 'created_at');
           if (!hasCreatedAt) {
-            console.error("[Schema] Migration: Füge created_at zu inference_rule hinzu...");
+            console.error("[Schema] Migration: Adding created_at to inference_rule...");
             await this.db.run(`
               ?[id, name, datalog, created_at] := *inference_rule{id, name, datalog}, created_at = 0
               :replace inference_rule {id: String => name: String, datalog: String, created_at: Int}
             `);
-            console.error("[Schema] Migration: inference_rule erfolgreich aktualisiert.");
+            console.error("[Schema] Migration: inference_rule successfully updated.");
           }
         } catch (e: any) {
-          console.error("[Schema] Inference Rule Migration Fehler:", e.message);
+          console.error("[Schema] Inference Rule migration error:", e.message);
         }
       }
 
@@ -785,7 +786,7 @@ export class MemoryServer {
             ?[from_id] := _new{from_id, to_id}, from_id == to_id :assert empty
           }
         `);
-        console.error("[Schema] Trigger 'check_no_self_loops' erstellt.");
+        console.error("[Schema] Trigger 'check_no_self_loops' created.");
       } catch (e: any) {
         // Fallback for environment where ::set_triggers might have slightly different behavior
         try {
@@ -797,9 +798,9 @@ export class MemoryServer {
               }
             }
           `);
-          console.error("[Schema] Trigger 'check_no_self_loops' erstellt (Fallback).");
+          console.error("[Schema] Trigger 'check_no_self_loops' created (Fallback).");
         } catch (e2: any) {
-          console.error("[Schema] Relationship Trigger Fehler:", e.message);
+          console.error("[Schema] Relationship Trigger error:", e.message);
         }
       }
       */
@@ -807,8 +808,8 @@ export class MemoryServer {
       // Triggers disabled for now due to syntax issues with current CozoDB version
       /*
       try {
-        // Dieser Trigger verhindert, dass eine Entität gleichzeitig als 'aktiv' und 'eingestellt' markiert wird
-        // wenn diese Informationen explizit in den Metadaten stehen.
+        // This trigger prevents an entity from being marked as 'active' and 'discontinued' at the same time
+        // if this information is explicitly in the metadata.
         await this.db.run(`
           ::set_triggers entity on put {
             ?[id] := _new{id, metadata}, 
@@ -817,7 +818,7 @@ export class MemoryServer {
             :assert empty
           }
         `);
-        console.error("[Schema] Trigger 'check_metadata_conflict' erstellt.");
+        console.error("[Schema] Trigger 'check_metadata_conflict' created.");
       } catch (e: any) {
         try {
           await this.db.run(`
@@ -828,19 +829,19 @@ export class MemoryServer {
               }
             }
           `);
-          console.error("[Schema] Trigger 'check_metadata_conflict' erstellt (Fallback).");
+          console.error("[Schema] Trigger 'check_metadata_conflict' created (Fallback).");
         } catch (e2: any) {
-          console.error("[Schema] Entity Metadata Trigger Fehler:", e.message);
+          console.error("[Schema] Entity Metadata Trigger error:", e.message);
         }
       }
       */
 
-      // User Profile Initialisierung
+      // User Profile Initialization
       await this.initUserProfile();
 
-      console.error("CozoDB Schema Setup abgeschlossen.");
+      console.error("CozoDB Schema Setup completed.");
     } catch (error: any) {
-      console.error("Unerwarteter Fehler beim Setup des Schemas:", error);
+      console.error("Unexpected error during schema setup:", error);
     }
   }
 
@@ -865,7 +866,7 @@ export class MemoryServer {
         query_vector: queryEmbedding, 
         limit: limit, 
         max_depth: maxDepth,
-        topk: 100, // Erhöht für Graph-Walking
+        topk: 100, // Increased for graph walking
         ef_search: 100
       };
 
@@ -932,7 +933,7 @@ export class MemoryServer {
         pagerank: r[4]
       }));
     } catch (error: any) {
-      console.error("Fehler in graph_walking:", error);
+      console.error("Error in graph_walking:", error);
       return { error: error.message };
     }
   }
@@ -991,7 +992,7 @@ export class MemoryServer {
       const toMeta = nameById.get(r.to_id);
       const fromName = fromMeta?.name ?? r.from_id;
       const toName = toMeta?.name ?? r.to_id;
-      const edgePart = r.relation_type === "expert_in" ? `Expertise für ${toName}` : `${r.relation_type} -> ${toName}`;
+      const edgePart = r.relation_type === "expert_in" ? `Expertise for ${toName}` : `${r.relation_type} -> ${toName}`;
       return {
         ...r,
         is_inferred: true as const,
@@ -999,7 +1000,7 @@ export class MemoryServer {
         from_type: fromMeta?.type,
         to_name: toMeta?.name,
         to_type: toMeta?.type,
-        uncertainty_hint: `Vermutlich ${fromName} (${edgePart}), da ${r.reason}`,
+        uncertainty_hint: `Presumably ${fromName} (${edgePart}), because ${r.reason}`,
       };
     });
   }
@@ -1007,19 +1008,19 @@ export class MemoryServer {
   public async createEntity(args: { name: string, type: string, metadata?: any }) {
     try {
       if (!args.name || args.name.trim() === "") {
-        return { error: "Name der Entität darf nicht leer sein" };
+        return { error: "Entity name must not be empty" };
       }
       if (!args.type || args.type.trim() === "") {
-        return { error: "Typ der Entität darf nicht leer sein" };
+        return { error: "Entity type must not be empty" };
       }
 
       // Check for existing entity with same name (case-insensitive)
       const existingId = await this.findEntityIdByName(args.name);
       if (existingId) {
-        return { id: existingId, name: args.name, type: args.type, status: "Entität existiert bereits (Name-Match)" };
+        return { id: existingId, name: args.name, type: args.type, status: "Entity already exists (Name-Match)" };
       }
 
-      // Konflikt-Erkennung (Application-Level Fallback für Triggers)
+      // Conflict Detection (Application-Level Fallback for Triggers)
       if (args.metadata) {
         const status = args.metadata.status || "";
         const isArchived = args.metadata.archived === true;
@@ -1027,19 +1028,19 @@ export class MemoryServer {
         const isEingestellt = status === "eingestellt" || isArchived;
 
         if (isAktiv && isEingestellt) {
-          throw new Error(`Konflikt erkannt: Entität '${args.name}' kann nicht gleichzeitig 'aktiv' und 'eingestellt' sein.`);
+          throw new Error(`Conflict detected: Entity '${args.name}' cannot be 'active' and 'discontinued' at the same time.`);
         }
       }
 
       const id = uuidv4();
       return this.createEntityWithId(id, args.name, args.type, args.metadata);
     } catch (error: any) {
-      console.error("Fehler in create_entity:", error);
+      console.error("Error in create_entity:", error);
       if (error.display) {
-        console.error("CozoDB Fehler-Details:", error.display);
+        console.error("CozoDB Error Details:", error.display);
       }
       return { 
-        error: "Interner Fehler beim Erstellen der Entität", 
+        error: "Internal error creating entity", 
         message: error.message || String(error),
         details: error.stack,
         cozo_display: error.display
@@ -1050,7 +1051,7 @@ export class MemoryServer {
   private async createEntityWithId(id: string, name: string, type: string, metadata?: any) {
     const embedding = await this.embeddingService.embed(`${name} ${type}`);
     const name_embedding = await this.embeddingService.embed(name);
-    console.error(`[Debug] Embeddings erstellt für ${name}.`);
+    console.error(`[Debug] Embeddings created for ${name}.`);
 
     // Use direct vector binding for performance and to avoid long string issues
     const now = Date.now() * 1000;
@@ -1060,37 +1061,37 @@ export class MemoryServer {
       ] :insert entity {id, created_at => name, type, embedding, name_embedding, metadata}
     `, { id, name, type, embedding, name_embedding, metadata: metadata || {} });
 
-    return { id, name, type, status: "Entität erstellt" };
+    return { id, name, type, status: "Entity created" };
   }
 
   private async initUserProfile() {
     try {
       const res = await this.db.run('?[id] := *entity{id, @ "NOW"}, id = $id', { id: USER_ENTITY_ID });
       if (res.rows.length === 0) {
-        console.error("[User] Initialisiere globales Benutzerprofil...");
+        console.error("[User] Initializing global user profile...");
         await this.createEntityWithId(USER_ENTITY_ID, USER_ENTITY_NAME, USER_ENTITY_TYPE, { is_global_user: true });
         
         await this.addObservation({
           entity_id: USER_ENTITY_ID,
-          text: "Dies ist das globale Benutzerprofil für Präferenzen und Arbeitsstile.",
+          text: "This is the global user profile for preferences and work styles.",
           metadata: { kind: "system_init" }
         });
-        console.error("[User] Globales Benutzerprofil erstellt.");
+        console.error("[User] Global user profile created.");
       }
     } catch (e: any) {
-      console.error("[User] Fehler bei Initialisierung des Benutzerprofils:", e.message);
+      console.error("[User] Error initializing user profile:", e.message);
     }
   }
 
   public async updateEntity(args: { id: string, name?: string, type?: string, metadata?: any }) {
     try {
       const current = await this.db.run('?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}', { id: args.id });
-      if (current.rows.length === 0) return { error: "Entität nicht gefunden" };
+      if (current.rows.length === 0) return { error: "Entity not found" };
 
       const name = args.name ?? current.rows[0][0];
       const type = args.type ?? current.rows[0][1];
       
-      // Konflikt-Erkennung (Application-Level Fallback für Triggers)
+      // Conflict Detection (Application-Level Fallback for Triggers)
       const mergedMetadata = { ...(current.rows[0][2] || {}), ...(args.metadata || {}) };
       const status = mergedMetadata.status || "";
       const isArchived = mergedMetadata.archived === true;
@@ -1098,14 +1099,14 @@ export class MemoryServer {
       const isEingestellt = status === "eingestellt" || isArchived;
 
       if (isAktiv && isEingestellt) {
-        throw new Error(`Konflikt erkannt: Entität '${name}' kann nicht gleichzeitig 'aktiv' und 'eingestellt' sein.`);
+        throw new Error(`Conflict detected: Entity '${name}' cannot be 'active' and 'discontinued' at the same time.`);
       }
 
       // Check if the new name already exists for a DIFFERENT entity
       if (args.name && args.name !== current.rows[0][0]) {
         const existingId = await this.findEntityIdByName(args.name);
         if (existingId && existingId !== args.id) {
-          return { error: `Name '${args.name}' wird bereits von einer anderen Entität (${existingId}) verwendet.` };
+          return { error: `Name '${args.name}' is already used by another entity (${existingId}).` };
         }
       }
 
@@ -1113,7 +1114,7 @@ export class MemoryServer {
       const name_embedding = await this.embeddingService.embed(name);
       const now = Date.now() * 1000;
       
-      // Nutze v0.7 :update und ++ für Metadaten-Merge (v1.7 Multi-Vector)
+      // Using v0.7 :update and ++ for metadata merge (v1.7 Multi-Vector)
       await this.db.run(`
         ?[id, created_at, name, type, embedding, name_embedding, metadata] := 
           *entity{id, created_at, metadata: old_meta, @ "NOW"},
@@ -1133,11 +1134,11 @@ export class MemoryServer {
         new_meta: args.metadata || {} 
       });
 
-      return { status: "Entität aktualisiert", id: args.id };
+      return { status: "Entity updated", id: args.id };
     } catch (error: any) {
-      console.error("Fehler in update_entity:", error);
+      console.error("Error in update_entity:", error);
       return {
-        error: "Interner Fehler beim Aktualisieren der Entität",
+        error: "Internal error updating entity",
         message: error.message || String(error),
         details: error.stack,
         cozo_display: error.display
@@ -1148,7 +1149,7 @@ export class MemoryServer {
   public async addObservation(args: { entity_id?: string; entity_name?: string; entity_type?: string; text: string; metadata?: any; deduplicate?: boolean }) {
     try {
       if (!args.text || args.text.trim() === "") {
-        return { error: "Beobachtungstext darf nicht leer sein" };
+        return { error: "Observation text must not be empty" };
       }
 
       const deduplicate = args.deduplicate ?? true;
@@ -1158,12 +1159,12 @@ export class MemoryServer {
       if (args.entity_id) {
         const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.entity_id });
         if (entityRes.rows.length === 0) {
-          return { error: `Entität mit ID '${args.entity_id}' nicht gefunden` };
+          return { error: `Entity with ID '${args.entity_id}' not found` };
         }
         entityId = args.entity_id;
       } else {
         const entityName = (args.entity_name ?? "").trim();
-        if (!entityName) return { error: "Für Ingest muss zwingend 'entity_id' oder 'entity_name' angegeben werden, um die Daten zuzuordnen." };
+        if (!entityName) return { error: "For ingest, 'entity_id' or 'entity_name' is mandatory to assign data." };
         const existing = await this.findEntityIdByName(entityName);
         if (existing) {
           entityId = existing;
@@ -1195,13 +1196,13 @@ export class MemoryServer {
               status: 'duplicate_detected',
               existing_observation_id: existingId,
               similarity: 1.0,
-              suggestion: 'Exakt gleiche Beobachtung existiert bereits.',
+              suggestion: 'Exact same observation already exists.',
               text: existingText
             };
           }
 
           // 2. Near-duplicate check via LSH (v0.7)
-          // Hinweis: bind_distance wird bei LSH nicht unterstützt, stattdessen wird k: 1 genutzt
+          // Note: bind_distance is not supported in LSH, using k: 1 instead
           const nearDup = await this.db.run(
             `
             ?[existing_id, existing_text] :=
@@ -1217,8 +1218,8 @@ export class MemoryServer {
             return {
               status: 'duplicate_detected',
               existing_observation_id: existingId,
-              similarity: 0.9, // Schätzwert, da LSH nur Treffer innerhalb der Threshold liefert
-              suggestion: 'Sehr ähnliche Beobachtung gefunden (LSH Match).',
+              similarity: 0.9, // Estimate, as LSH only returns hits within threshold
+              suggestion: 'Very similar observation found (LSH Match).',
               text: existingText
             };
           }
@@ -1234,37 +1235,37 @@ export class MemoryServer {
         ] :insert observation {id, created_at => entity_id, text, embedding, metadata}
       `, { id, entity_id: entityId, text: args.text, embedding, metadata: args.metadata || {} });
 
-      // Optional: Automatische Inferenz nach neuer Beobachtung (im Hintergrund)
+      // Optional: Automatic inference after new observation (in background)
       const suggestionsRaw = await this.inferenceEngine.inferRelations(entityId);
       const suggestions = await this.formatInferredRelationsForContext(suggestionsRaw);
 
       return { 
         id, 
         entity_id: entityId, 
-        status: "Beobachtung gespeichert", 
+        status: "Observation saved", 
         inferred_suggestions: suggestions 
       };
     } catch (error: any) {
-      return { error: error.message || "Unbekannter Fehler" };
+      return { error: error.message || "Unknown error" };
     }
   }
 
   public async createRelation(args: { from_id: string, to_id: string, relation_type: string, strength?: number, metadata?: any }) {
     if (args.from_id === args.to_id) {
-      return { error: "Selbst-Referenzen in Beziehungen sind nicht erlaubt" };
+      return { error: "Self-references in relationships are not allowed" };
     }
 
-    // Prüfe ob beide Entities existieren
+    // Check if both entities exist
     const [fromEntity, toEntity] = await Promise.all([
       this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.from_id }),
       this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.to_id })
     ]);
 
     if (fromEntity.rows.length === 0) {
-      return { error: `Quell-Entität mit ID '${args.from_id}' nicht gefunden` };
+      return { error: `Source entity with ID '${args.from_id}' not found` };
     }
     if (toEntity.rows.length === 0) {
-      return { error: `Ziel-Entität mit ID '${args.to_id}' nicht gefunden` };
+      return { error: `Target entity with ID '${args.to_id}' not found` };
     }
 
     const now = Date.now() * 1000;
@@ -1276,16 +1277,16 @@ export class MemoryServer {
       metadata: args.metadata || {}
     });
 
-    return { status: "Beziehung erstellt" };
+    return { status: "Relationship created" };
   }
 
   public async exploreGraph(args: { start_entity: string; end_entity?: string; max_hops?: number; relation_types?: string[] }) {
     await this.initPromise;
 
-    // Prüfe ob Start-Entität existiert
+    // Check if start entity exists
     const startRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.start_entity });
     if (startRes.rows.length === 0) {
-      throw new Error(`Start-Entität mit ID '${args.start_entity}' nicht gefunden`);
+      throw new Error(`Start entity with ID '${args.start_entity}' not found`);
     }
 
     const start = args.start_entity;
@@ -1424,24 +1425,24 @@ ids[id] <- $ids
   }
 
   /**
-   * Trackt die zeitliche Veränderung von Beziehungen einer Entität (Time-Travel Analysis).
-   * Liefert eine Liste von Events (ASSERTED/RETRACTED) über die Zeit.
-   * Optionale Filter für Ziel-Entität und Zeitbereich.
+   * Tracks the temporal evolution of relationships of an entity (Time-Travel Analysis).
+   * Returns a list of events (ASSERTED/RETRACTED) over time.
+   * Optional filters for target entity and time range.
    */
   public async getRelationEvolution(args: { 
     from_id: string; 
     to_id?: string;
-    since?: number; // Unix-Timestamp in ms
-    until?: number; // Unix-Timestamp in ms
+    since?: number; // Unix timestamp in ms
+    until?: number; // Unix timestamp in ms
   }) {
     await this.initPromise;
 
     const fromId = args.from_id;
     const toId = args.to_id;
-    const since = args.since ? args.since * 1000 : undefined; // Cozo nutzt Mikrosekunden
+    const since = args.since ? args.since * 1000 : undefined; // Cozo uses microseconds
     const until = args.until ? args.until * 1000 : undefined;
 
-    // 1. Abfrage aller historischen Zustände für diese Beziehung(en)
+    // 1. Query all historical states for this relationship(s)
     let query = `
       ?[from_id, to_id, relation_type, strength, metadata, created_at] := 
         *relationship{from_id, to_id, relation_type, strength, metadata, created_at},
@@ -1456,7 +1457,7 @@ ids[id] <- $ids
 
     const res = await this.db.run(query, params);
 
-    // 2. Namen der beteiligten Entitäten auflösen
+    // 2. Resolve names of involved entities
     const uniqueIds = new Set<string>();
     uniqueIds.add(fromId);
     (res.rows || []).forEach((r: any) => uniqueIds.add(String(r[1])));
@@ -1469,7 +1470,7 @@ ids[id] <- $ids
     const nameById = new Map<string, string>();
     (nameRes.rows || []).forEach((r: any) => nameById.set(String(r[0]), String(r[1])));
 
-    // 3. Events verarbeiten und filtern
+    // 3. Process and filter events
     let events = (res.rows || []).map((r: any) => {
       const validity = r[5]; // [timestamp, is_asserted]
       const timestamp = Number(validity[0]);
@@ -1489,7 +1490,7 @@ ids[id] <- $ids
       };
     });
 
-    // Zeitbereichs-Filter anwenden
+    // Apply time range filter
     if (since !== undefined) {
       events = events.filter((e: any) => e.timestamp >= since);
     }
@@ -1497,19 +1498,19 @@ ids[id] <- $ids
       events = events.filter((e: any) => e.timestamp <= until);
     }
 
-    // Sortierung nach Zeit (aufsteigend)
+    // Sort by time (ascending)
     events.sort((a: any, b: any) => a.timestamp - b.timestamp);
 
-    // 4. Diff-Zusammenfassung erstellen
+    // 4. Create diff summary
     const diff = {
       added: [] as any[],
       removed: [] as any[],
       modified: [] as any[]
     };
 
-    // Einfache Logik: Wir schauen uns die Events im gewählten Zeitraum an
-    // Für eine echte "Diff" Analyse zwischen zwei Zeitpunkten müsste man den Zustand @ start und @ end vergleichen.
-    // Hier liefern wir erst einmal die Änderungen im Zeitraum.
+    // Simple logic: We look at the events in the selected time period
+    // For a real "diff" analysis between two points in time, one would have to compare the state @ start and @ end.
+    // Here we provide the changes in the time period for now.
     events.forEach((e: any) => {
       if (e.operation === "ASSERTED") {
         diff.added.push(e);
@@ -1546,7 +1547,7 @@ ids[id] <- $ids
         entitiesToReflect.push({ id: String(res.rows[0][0]), name: String(res.rows[0][1]), type: String(res.rows[0][2]) });
       }
     } else {
-      // Wähle Top 5 Entitäten mit den meisten Beobachtungen
+      // Select top 5 entities with the most observations
       const res = await this.db.run(`
         ?[id, name, type, count(id)] := 
           *entity{id, name, type, @ "NOW"}, 
@@ -1566,19 +1567,19 @@ ids[id] <- $ids
       });
 
       if (obsRes.rows.length < 2) {
-        results.push({ entity_id: entity.id, status: "skipped", reason: "Zu wenige Beobachtungen für Reflexion" });
+        results.push({ entity_id: entity.id, status: "skipped", reason: "Too few observations for reflection" });
         continue;
       }
 
       const observations = obsRes.rows.map((r: any) => `- [${new Date(Number(r[1]) / 1000).toISOString()}] ${r[0]}`);
 
-      const systemPrompt = `Du bist ein analytisches Gedächtnismodul. Analysiere die folgenden Beobachtungen zu einer Entität. 
-Suche nach Widersprüchen, zeitlichen Entwicklungen, Verhaltensmustern oder tieferen Einsichten. 
-Formuliere eine prägnante Reflexion (max. 3-4 Sätze), die dem Nutzer hilft, den aktuellen Stand oder die Evolution zu verstehen.
-Falls es widersprüchliche Aussagen gibt, benenne diese explizit.
-Falls keine besonderen Muster erkennbar sind, antworte mit "Keine neuen Erkenntnisse".`;
+      const systemPrompt = `You are an analytical memory module. Analyze the following observations about an entity. 
+Look for contradictions, temporal developments, behavioral patterns, or deeper insights. 
+Formulate a concise reflection (max. 3-4 sentences) that helps the user understand the current state or evolution.
+If there are contradictory statements, name them explicitly.
+If no special patterns are recognizable, answer with "No new insights".`;
 
-      const userPrompt = `Entität: ${entity.name} (${entity.type})\n\nBeobachtungen:\n${observations.join("\n")}`;
+      const userPrompt = `Entity: ${entity.name} (${entity.type})\n\nObservations:\n${observations.join("\n")}`;
 
       let reflectionText: string;
       try {
@@ -1597,10 +1598,10 @@ Falls keine besonderen Muster erkennbar sind, antworte mit "Keine neuen Erkenntn
         reflectionText = "";
       }
 
-      if (reflectionText && reflectionText !== "Keine neuen Erkenntnisse" && !reflectionText.includes("Keine neuen Erkenntnisse")) {
+      if (reflectionText && reflectionText !== "No new insights" && !reflectionText.includes("No new insights")) {
         await this.addObservation({
           entity_id: entity.id,
-          text: `Reflexive Einsicht: ${reflectionText}`,
+          text: `Reflexive insight: ${reflectionText}`,
           metadata: { kind: "reflection", model, generated_at: Date.now() },
         });
         results.push({ entity_id: entity.id, status: "reflected", insight: reflectionText });
@@ -1630,9 +1631,9 @@ Falls keine besonderen Muster erkennbar sind, antworte mit "Keine neuen Erkenntn
     const list = ids.map((id) => [id]);
 
     const activeRe =
-      "(?i).*(\\baktiv\\b|\\bläuft\\b|\\bongoing\\b|\\bactive\\b|\\brunning\\b|in\\s+betrieb|wird\\s+fortgesetzt|weiter\\s+geführt|nicht\\s+eingestellt).*";
+      "(?i).*(\\bactive\\b|\\brunning\\b|\\bongoing\\b|in\\s+operation|continues|continued|not\\s+discontinued).*";
     const inactiveRe =
-      "(?i).*(eingestellt|abgebrochen|gestoppt|stillgelegt|geschlossen|shutdown|deprecated|archiviert|archived|beendet|aufgegeben).*";
+        "(?i).*(discontinued|cancelled|stopped|shut\\s+down|closed|shutdown|deprecated|archived|terminated|abandoned).*";
 
     const latestByRegex = async (re: string) => {
       const res = await this.db.run(
@@ -1672,9 +1673,9 @@ Falls keine besonderen Muster erkennbar sind, antworte mit "Keine neuen Erkenntn
       const ay = toYear(active.created_at);
       const iy = toYear(inactive.created_at);
 
-      // Ein Konflikt liegt nur vor, wenn beide Informationen aus dem gleichen Zeitraum (Jahr) stammen.
-      // Unterschiedliche Jahre deuten auf eine Statusänderung hin (z.B. 2024 eingestellt, 2025 wieder aktiv).
-      // Das entspricht dem Vorschlag für temporale Konsistenz.
+      // A conflict only exists if both pieces of information are from the same time period (year).
+      // Different years indicate a status change (e.g. discontinued in 2024, active again in 2025).
+      // This matches the proposal for temporal consistency.
       return ay === iy;
     });
 
@@ -1704,7 +1705,7 @@ ids[id] <- $ids
           entity_name: meta.name,
           entity_type: meta.type,
           kind: "status" as const,
-          summary: `Konflikt: Es gibt widersprüchliche Infos zum Status von ${meta.name} im gleichen Zeitraum (${years}).`,
+          summary: `Conflict: Contradictory info on status of ${meta.name} in same period (${years}).`,
           evidence: {
             active: { created_at: active.created_at, year: ay, text: active.text },
             inactive: { created_at: inactive.created_at, year: iy, text: inactive.text },
@@ -1730,19 +1731,19 @@ ids[id] <- $ids
     await this.initPromise;
     try {
       if (!args.name || args.name.trim() === "") {
-        return { error: "Regelname darf nicht leer sein" };
+        return { error: "Rule name must not be empty" };
       }
       if (!args.datalog || args.datalog.trim() === "") {
-        return { error: "Datalog darf nicht leer sein" };
+        return { error: "Datalog must not be empty" };
       }
 
-      // Prüfe, ob bereits eine Regel mit diesem Namen existiert
+      // Check if a rule with this name already exists
       const existingRule = await this.db.run('?[id] := *inference_rule{name: $name, id}', { name: args.name });
       if (existingRule.rows.length > 0) {
-        return { error: `Eine Inferenzregel mit dem Namen '${args.name}' existiert bereits.` };
+        return { error: `An inference rule with the name '${args.name}' already exists.` };
       }
 
-      // Validierung des Datalog-Codes
+      // Validate Datalog code
       try {
         const validationRes = await this.db.run(args.datalog, { id: "validation-test" });
         const expectedHeaders = ["from_id", "to_id", "relation_type", "confidence", "reason"];
@@ -1750,10 +1751,10 @@ ids[id] <- $ids
         
         const missingHeaders = expectedHeaders.filter(h => !actualHeaders.includes(h));
         if (missingHeaders.length > 0) {
-          return { error: `Ungültiges Datalog-Resultset. Fehlende Spalten: ${missingHeaders.join(", ")}. Erwartet werden: ${expectedHeaders.join(", ")}` };
+          return { error: `Invalid Datalog result set. Missing columns: ${missingHeaders.join(", ")}. Expected: ${expectedHeaders.join(", ")}` };
         }
       } catch (validationError: any) {
-        return { error: `Datalog-Syntaxfehler: ${validationError.message}` };
+        return { error: `Datalog syntax error: ${validationError.message}` };
       }
 
       const id = uuidv4();
@@ -1762,9 +1763,9 @@ ids[id] <- $ids
         "?[id, name, datalog, created_at] <- [[$id, $name, $datalog, $now]] :put inference_rule {id => name, datalog, created_at}",
         { id, name: args.name, datalog: args.datalog, now },
       );
-      return { id, name: args.name, status: "Regel gespeichert" };
+      return { id, name: args.name, status: "Rule saved" };
     } catch (error: any) {
-      return { error: error.message || "Fehler beim Speichern der Regel" };
+      return { error: error.message || "Error saving rule" };
     }
   }
 
@@ -1801,18 +1802,18 @@ ids[id] <- $ids
     await this.initPromise;
     try {
       const content = (args.content ?? "").trim();
-      if (!content) return { error: "content darf nicht leer sein" };
+      if (!content) return { error: "Content must not be empty" };
 
       let entityId: string | undefined = undefined;
       let createdEntity = false;
 
       if (args.entity_id) {
         const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.entity_id });
-        if (entityRes.rows.length === 0) return { error: `Entität mit ID '${args.entity_id}' nicht gefunden` };
+        if (entityRes.rows.length === 0) return { error: `Entity with ID '${args.entity_id}' not found` };
         entityId = args.entity_id;
       } else {
         const entityName = (args.entity_name ?? "").trim();
-        if (!entityName) return { error: "Für Ingest muss zwingend 'entity_id' oder 'entity_name' angegeben werden, um die Daten zuzuordnen." };
+        if (!entityName) return { error: "For ingest, 'entity_id' or 'entity_name' is mandatory to assign data." };
         const existing = await this.findEntityIdByName(entityName);
         if (existing) {
           entityId = existing;
@@ -1828,7 +1829,7 @@ ids[id] <- $ids
         }
       }
 
-      if (!entityId) return { error: "Entität konnte nicht bestimmt werden" };
+      if (!entityId) return { error: "Entity could not be determined" };
 
       const maxObs = Math.min(200, Math.max(1, Math.floor(args.max_observations ?? 50)));
       const deduplicate = args.deduplicate ?? true;
@@ -1851,11 +1852,11 @@ ids[id] <- $ids
         try {
           parsed = JSON.parse(content);
         } catch {
-          return { error: "JSON konnte nicht geparst werden" };
+          return { error: "JSON could not be parsed" };
         }
 
         const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.observations) ? parsed.observations : null;
-        if (!items) return { error: "JSON erwartet Array oder { observations: [...] }" };
+        if (!items) return { error: "JSON expects Array or { observations: [...] }" };
 
         for (const item of items.slice(0, maxObs)) {
           if (typeof item === "string") {
@@ -1870,7 +1871,7 @@ ids[id] <- $ids
         }
       }
 
-      if (observations.length === 0) return { error: "Keine Observations extrahiert" };
+      if (observations.length === 0) return { error: "No observations extracted" };
 
       const insertedIds: string[] = [];
       let skippedDuplicates = 0;
@@ -1903,19 +1904,19 @@ ids[id] <- $ids
         observation_ids: insertedIds,
       };
     } catch (error: any) {
-      return { error: error.message || "Fehler beim Ingest" };
+      return { error: error.message || "Error during ingest" };
     }
   }
 
   public async deleteEntity(args: { entity_id: string }) {
     try {
-      // 1. Prüfe ob Entity existiert
+      // 1. Check if entity exists
       const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.entity_id });
       if (entityRes.rows.length === 0) {
-        return { error: `Entität mit ID '${args.entity_id}' nicht gefunden` };
+        return { error: `Entity with ID '${args.entity_id}' not found` };
       }
 
-      // 2. Lösche alle zugehörigen Daten in einer Transaktion (Block)
+      // 2. Delete all related data in a transaction (block)
       await this.db.run(`
         { ?[id, created_at] := *observation{id, entity_id, created_at}, entity_id = $target_id :rm observation {id, created_at} }
         { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, from_id = $target_id :rm relationship {from_id, to_id, relation_type, created_at} }
@@ -1923,10 +1924,10 @@ ids[id] <- $ids
         { ?[id, created_at] := *entity{id, created_at}, id = $target_id :rm entity {id, created_at} }
       `, { target_id: args.entity_id });
 
-      return { status: "Entität und alle zugehörigen Daten gelöscht" };
+      return { status: "Entity and all related data deleted" };
     } catch (error: any) {
-      console.error("Fehler beim Löschen:", error);
-      return { error: "Löschen fehlgeschlagen", message: error.message };
+      console.error("Error during deletion:", error);
+      return { error: "Deletion failed", message: error.message };
     }
   }
 
@@ -1956,12 +1957,12 @@ ids[id] <- $ids
             try {
                 params = JSON.parse(params);
             } catch (e) {
-                return { error: `Ungültige JSON-Parameter (Parse Error) in Operation ${i}` };
+                return { error: `Invalid JSON parameters (Parse Error) in operation ${i}` };
             }
         }
 
         if (!params || typeof params !== 'object') {
-            return { error: `Ungültige Parameterstruktur (kein Objekt) in Operation ${i}` };
+            return { error: `Invalid parameter structure (not an object) in operation ${i}` };
         }
         
         switch (op.action) {
@@ -2039,7 +2040,7 @@ ids[id] <- $ids
                      }
                   }
                } else {
-                  return { error: `entity_id oder entity_name wird für add_observation benötigt in Operation ${i}` };
+                  return { error: `entity_id or entity_name is required for add_observation in operation ${i}` };
                }
             }
 
@@ -2109,24 +2110,24 @@ ids[id] <- $ids
           case "delete_entity": {
             const { entity_id } = params;
             if (!entity_id) {
-               return { error: `Fehlende entity_id für delete_entity in Operation ${i}` };
+               return { error: `Missing entity_id for delete_entity in operation ${i}` };
             }
 
             allParams[`target_id${suffix}`] = entity_id;
 
-            // Lösche Observations
+            // Delete observations
             statements.push(`
               { ?[id, created_at] := *observation{id, entity_id, created_at}, entity_id = $target_id${suffix} :rm observation {id, created_at} }
             `);
-            // Lösche ausgehende Beziehungen
+            // Delete outgoing relationships
             statements.push(`
               { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, from_id = $target_id${suffix} :rm relationship {from_id, to_id, relation_type, created_at} }
             `);
-            // Lösche eingehende Beziehungen
+            // Delete incoming relationships
             statements.push(`
               { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, to_id = $target_id${suffix} :rm relationship {from_id, to_id, relation_type, created_at} }
             `);
-            // Lösche Entity selbst
+            // Delete entity itself
             statements.push(`
               { ?[id, created_at] := *entity{id, created_at}, id = $target_id${suffix} :rm entity {id, created_at} }
             `);
@@ -2136,24 +2137,24 @@ ids[id] <- $ids
           }
           
           default:
-            return { error: `Unbekannte Operation: ${(op as any).action}` };
+            return { error: `Unknown operation: ${(op as any).action}` };
         }
       }
 
       const transactionQuery = statements.join("\n");
-      console.error(`[Transaction] Führe ${statements.length} Operationen atomar aus...`);
+      console.error(`[Transaction] Executing ${statements.length} operations atomically...`);
       
       await this.db.run(transactionQuery, allParams);
       
       return { 
         status: "success", 
-        message: `${statements.length} Operationen atomar ausgeführt`,
+        message: `${statements.length} operations executed atomically`,
         results 
       };
     } catch (error: any) {
-      console.error("Fehler in runTransaction:", error);
+      console.error("Error in runTransaction:", error);
       return { 
-        error: "Transaktion fehlgeschlagen", 
+        error: "Transaction failed", 
         message: error.message,
         cozo_display: error.display 
       };
@@ -2243,40 +2244,40 @@ ids[id] <- $ids
     const MutateMemorySchema = z.discriminatedUnion("action", [
       z.object({
         action: z.literal("create_entity"),
-        name: z.string().describe("Name der Entität"),
-        type: z.string().describe("Typ der Entität"),
-        metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
+        name: z.string().describe("Name of the entity"),
+        type: z.string().describe("Type of the entity"),
+        metadata: MetadataSchema.optional().describe("Additional metadata"),
       }),
       z.object({
         action: z.literal("update_entity"),
-        id: z.string().describe("ID der zu aktualisierenden Entität"),
-        name: z.string().min(1).optional().describe("Neuer Name"),
-        type: z.string().min(1).optional().describe("Neuer Typ"),
-        metadata: MetadataSchema.optional().describe("Neue Metadaten"),
+        id: z.string().describe("ID of the entity to update"),
+        name: z.string().min(1).optional().describe("New name"),
+        type: z.string().min(1).optional().describe("New type"),
+        metadata: MetadataSchema.optional().describe("New metadata"),
       }),
       z.object({
         action: z.literal("delete_entity"),
-        entity_id: z.string().describe("ID der zu löschenden Entität"),
+        entity_id: z.string().describe("ID of the entity to delete"),
       }),
       z.object({
         action: z.literal("add_observation"),
-        entity_id: z.string().optional().describe("ID der Entität"),
-        entity_name: z.string().optional().describe("Name der Entität (wird erstellt, falls nicht vorhanden)"),
-        entity_type: z.string().optional().default("Unknown").describe("Typ der Entität (nur beim Erstellen)"),
-        text: z.string().describe("Der Fakt oder die Beobachtung"),
-        metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
-        deduplicate: z.boolean().optional().default(true).describe("Exakte Duplikate überspringen"),
+        entity_id: z.string().optional().describe("ID of the entity"),
+        entity_name: z.string().optional().describe("Name of the entity (will be created if not exists)"),
+        entity_type: z.string().optional().default("Unknown").describe("Type of the entity (only when creating)"),
+        text: z.string().describe("The fact or observation"),
+        metadata: MetadataSchema.optional().describe("Additional metadata"),
+        deduplicate: z.boolean().optional().default(true).describe("Skip exact duplicates"),
       }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
-        message: "entity_id oder entity_name wird benötigt",
+        message: "entity_id or entity_name is required",
         path: ["entity_id"],
       }),
       z.object({
         action: z.literal("create_relation"),
-        from_id: z.string().describe("Quell-Entität ID"),
-        to_id: z.string().describe("Ziel-Entität ID"),
-        relation_type: z.string().nonempty().describe("Art der Beziehung"),
-        strength: z.number().min(0).max(1).optional().default(1.0).describe("Stärke der Beziehung"),
-        metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
+        from_id: z.string().describe("Source entity ID"),
+        to_id: z.string().describe("Target entity ID"),
+        relation_type: z.string().nonempty().describe("Type of the relationship"),
+        strength: z.number().min(0).max(1).optional().default(1.0).describe("Strength of the relationship"),
+        metadata: MetadataSchema.optional().describe("Additional metadata"),
       }),
       z.object({
         action: z.literal("run_transaction"),
@@ -2285,72 +2286,72 @@ ids[id] <- $ids
             action: z.literal("create_entity"),
             params: z.union([
               z.object({
-                name: z.string().describe("Name der Entität"),
-                type: z.string().describe("Typ der Entität"),
-                metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
+                name: z.string().describe("Name of the entity"),
+                type: z.string().describe("Type of the entity"),
+                metadata: MetadataSchema.optional().describe("Additional metadata"),
               }),
-              z.string().describe("JSON-String der Parameter")
+              z.string().describe("JSON string of parameters")
             ])
           }),
           z.object({
             action: z.literal("delete_entity"),
             params: z.union([
               z.object({
-                entity_id: z.string().describe("ID der zu löschenden Entität"),
+                entity_id: z.string().describe("ID of the entity to delete"),
               }),
-              z.string().describe("JSON-String der Parameter")
+              z.string().describe("JSON string of parameters")
             ])
           }),
           z.object({
             action: z.literal("add_observation"),
             params: z.union([
               z.object({
-                entity_id: z.string().optional().describe("ID der Entität"),
-                entity_name: z.string().optional().describe("Name der Entität (wird erstellt, falls nicht vorhanden)"),
-                entity_type: z.string().optional().default("Unknown").describe("Typ der Entität (nur beim Erstellen)"),
-                text: z.string().describe("Der Fakt oder die Beobachtung"),
-                metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
+                entity_id: z.string().optional().describe("ID of the entity"),
+                entity_name: z.string().optional().describe("Name of the entity (will be created if not exists)"),
+                entity_type: z.string().optional().default("Unknown").describe("Type of the entity (only when creating)"),
+                text: z.string().describe("The fact or observation"),
+                metadata: MetadataSchema.optional().describe("Additional metadata"),
               }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
-                message: "entity_id oder entity_name wird benötigt",
+                message: "entity_id or entity_name is required",
                 path: ["entity_id"],
               }),
-              z.string().describe("JSON-String der Parameter")
+              z.string().describe("JSON string of parameters")
             ])
           }),
           z.object({
             action: z.literal("create_relation"),
             params: z.union([
               z.object({
-                from_id: z.string().describe("Quell-Entität ID"),
-                to_id: z.string().describe("Ziel-Entität ID"),
-                relation_type: z.string().nonempty().describe("Art der Beziehung"),
-                strength: z.number().min(0).max(1).optional().default(1.0).describe("Stärke der Beziehung"),
-                metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten"),
+                from_id: z.string().describe("Source entity ID"),
+                to_id: z.string().describe("Target entity ID"),
+                relation_type: z.string().nonempty().describe("Type of the relationship"),
+                strength: z.number().min(0).max(1).optional().default(1.0).describe("Strength of the relationship"),
+                metadata: MetadataSchema.optional().describe("Additional metadata"),
               }),
-              z.string().describe("JSON-String der Parameter")
+              z.string().describe("JSON string of parameters")
             ])
           }),
-        ])).describe("Liste der atomar auszuführenden Operationen")
+        ])).describe("List of operations to be executed atomically")
       }),
       z.object({
         action: z.literal("add_inference_rule"),
-        name: z.string().describe("Name der Regel"),
+        name: z.string().describe("Name of the rule"),
         datalog: z.string().describe("CozoDB Datalog Query"),
       }),
       z.object({
         action: z.literal("ingest_file"),
-        entity_id: z.string().optional().describe("ID der Ziel-Entität"),
-        entity_name: z.string().optional().describe("Name der Ziel-Entität (wird erstellt, falls nicht vorhanden)"),
-        entity_type: z.string().optional().default("Document").describe("Typ der Ziel-Entität (nur beim Erstellen)"),
-        format: z.enum(["markdown", "json"]).describe("Eingabeformat"),
-        chunking: z.enum(["none", "paragraphs"]).optional().default("none").describe("Chunking für Markdown"),
-        content: z.string().describe("Dateiinhalt (oder LLM-Zusammenfassung)"),
-        metadata: MetadataSchema.optional().describe("Metadaten für Entity-Erstellung"),
-        observation_metadata: MetadataSchema.optional().describe("Metadaten, die auf alle Observations angewendet werden"),
-        deduplicate: z.boolean().optional().default(true).describe("Exakte Duplikate überspringen"),
-        max_observations: z.number().min(1).max(200).optional().default(50).describe("Maximale Anzahl Observations"),
+        entity_id: z.string().optional().describe("ID of the target entity"),
+        entity_name: z.string().optional().describe("Name of the target entity (will be created if not exists)"),
+        entity_type: z.string().optional().default("Document").describe("Type of the target entity (only when creating)"),
+        format: z.enum(["markdown", "json"]).describe("Input format"),
+        chunking: z.enum(["none", "paragraphs"]).optional().default("none").describe("Chunking for Markdown"),
+        content: z.string().describe("File content (or LLM summary)"),
+        metadata: MetadataSchema.optional().describe("Metadata for entity creation"),
+        observation_metadata: MetadataSchema.optional().describe("Metadata applied to all observations"),
+        deduplicate: z.boolean().optional().default(true).describe("Skip exact duplicates"),
+        max_observations: z.number().min(1).max(200).optional().default(50).describe("Maximum number of observations"),
       }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
-        message: "entity_id oder entity_name wird für ingest_file benötigt",
+        message: "entity_id or entity_name is required for ingest_file",
         path: ["entity_id"],
       }),
     ]);
@@ -2358,66 +2359,66 @@ ids[id] <- $ids
     const MutateMemoryParameters = z.object({
       action: z
         .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file"])
-        .describe("Aktion (bestimmt welche Felder erforderlich sind)"),
-      name: z.string().optional().describe("Für create_entity (erforderlich) oder add_inference_rule (erforderlich)"),
-      type: z.string().optional().describe("Für create_entity erforderlich"),
-      id: z.string().optional().describe("Für update_entity erforderlich"),
-      entity_id: z.string().optional().describe("Für delete_entity erforderlich; alternativ zu entity_name bei add_observation/ingest_file"),
-      entity_name: z.string().optional().describe("Für add_observation/ingest_file als Alternative zu entity_id"),
-      entity_type: z.string().optional().describe("Nur wenn entity_name verwendet wird und Entity neu erstellt wird"),
-      text: z.string().optional().describe("Für add_observation erforderlich"),
-      datalog: z.string().optional().describe("Für add_inference_rule erforderlich"),
-      format: z.enum(["markdown", "json"]).optional().describe("Für ingest_file erforderlich"),
-      chunking: z.enum(["none", "paragraphs"]).optional().describe("Optional für ingest_file (bei markdown)"),
-      content: z.string().optional().describe("Für ingest_file erforderlich"),
-      observation_metadata: MetadataSchema.optional().describe("Optional für ingest_file"),
-      deduplicate: z.boolean().optional().describe("Optional für ingest_file und add_observation"),
-      max_observations: z.number().optional().describe("Optional für ingest_file"),
-      from_id: z.string().optional().describe("Für create_relation erforderlich"),
-      to_id: z.string().optional().describe("Für create_relation erforderlich"),
-      relation_type: z.string().optional().describe("Für create_relation erforderlich"),
-      strength: z.number().min(0).max(1).optional().describe("Optional für create_relation"),
-      metadata: MetadataSchema.optional().describe("Optional für create_entity/update_entity/add_observation/create_relation/ingest_file"),
-      operations: z.array(z.any()).optional().describe("Für run_transaction erforderlich: Liste der atomar auszuführenden Operationen"),
+        .describe("Action (determines which fields are required)"),
+      name: z.string().optional().describe("For create_entity (required) or add_inference_rule (required)"),
+      type: z.string().optional().describe("For create_entity (required)"),
+      id: z.string().optional().describe("For update_entity (required)"),
+      entity_id: z.string().optional().describe("For delete_entity (required); alternative to entity_name for add_observation/ingest_file"),
+      entity_name: z.string().optional().describe("For add_observation/ingest_file as alternative to entity_id"),
+      entity_type: z.string().optional().describe("Only when entity_name is used and entity is created new"),
+      text: z.string().optional().describe("For add_observation (required)"),
+      datalog: z.string().optional().describe("For add_inference_rule (required)"),
+      format: z.enum(["markdown", "json"]).optional().describe("For ingest_file (required)"),
+      chunking: z.enum(["none", "paragraphs"]).optional().describe("Optional for ingest_file (for markdown)"),
+      content: z.string().optional().describe("For ingest_file (required)"),
+      observation_metadata: MetadataSchema.optional().describe("Optional for ingest_file"),
+      deduplicate: z.boolean().optional().describe("Optional for ingest_file and add_observation"),
+      max_observations: z.number().optional().describe("Optional for ingest_file"),
+      from_id: z.string().optional().describe("For create_relation (required)"),
+      to_id: z.string().optional().describe("For create_relation (required)"),
+      relation_type: z.string().optional().describe("For create_relation (required)"),
+      strength: z.number().min(0).max(1).optional().describe("Optional for create_relation"),
+      metadata: MetadataSchema.optional().describe("Optional for create_entity/update_entity/add_observation/create_relation/ingest_file"),
+      operations: z.array(z.any()).optional().describe("For run_transaction (required): List of operations to be executed atomically"),
     });
 
     this.mcp.addTool({
       name: "mutate_memory",
-      description: `Schreibzugriff auf das Gedächtnis. Wähle die Operation über 'action'.
-Unterstützte Aktionen:
-- 'create_entity': Erstellt eine neue Entität. Params: { name: string, type: string, metadata?: object }
-- 'update_entity': Aktualisiert eine bestehende Entität. Params: { id: string, name?: string, type?: string, metadata?: object }
-- 'delete_entity': Löscht eine Entität und ihre Beobachtungen. Params: { entity_id: string }
-- 'add_observation': Speichert einen Fakt. Params: { entity_id?: string, entity_name?: string, entity_type?: string, text: string, metadata?: object, deduplicate?: boolean }. Automatische Deduplizierung aktiv (deaktivierbar).
-  HINWEIS: Nutze die spezielle 'entity_id': 'global_user_profile', um persistente Benutzerpräferenzen (Vorlieben, Arbeitsstil, Abneigungen) zu speichern. Diese werden bei Suchen bevorzugt.
-- 'create_relation': Erstellt eine Verbindung zwischen Entitäten. Params: { from_id: string, to_id: string, relation_type: string, strength?: number (0-1), metadata?: object }. Keine Selbst-Referenzen erlaubt.
-- 'run_transaction': Führt mehrere Operationen atomar in einer Transaktion aus. Params: { operations: Array<{ action: "create_entity"|"add_observation"|"create_relation", params: object }> }. Ideal für komplexe, zusammenhängende Änderungen.
-- 'add_inference_rule': Fügt eine benutzerdefinierte Datalog-Inferenzregel hinzu. Params: { name: string, datalog: string }.
-  WICHTIG: Das Datalog-Resultset MUSS genau 5 Spalten liefern: [from_id, to_id, relation_type, confidence, reason].
-  Verwende '$id' als Platzhalter für die Start-Entität.
-  Verfügbare Tabellen:
+      description: `Write access to memory. Select operation via 'action'.
+Supported actions:
+- 'create_entity': Creates a new entity. Params: { name: string, type: string, metadata?: object }
+- 'update_entity': Updates an existing entity. Params: { id: string, name?: string, type?: string, metadata?: object }
+- 'delete_entity': Deletes an entity and its observations. Params: { entity_id: string }
+- 'add_observation': Stores a fact. Params: { entity_id?: string, entity_name?: string, entity_type?: string, text: string, metadata?: object, deduplicate?: boolean }. Automatic deduplication active (can be disabled).
+  NOTE: Use special 'entity_id': 'global_user_profile' to store persistent user preferences (likes, work style, dislikes). These are prioritized in searches.
+- 'create_relation': Creates a connection between entities. Params: { from_id: string, to_id: string, relation_type: string, strength?: number (0-1), metadata?: object }. No self-references allowed.
+- 'run_transaction': Executes multiple operations atomically in one transaction. Params: { operations: Array<{ action: "create_entity"|"add_observation"|"create_relation", params: object }> }. Ideal for complex, related changes.
+- 'add_inference_rule': Adds a custom Datalog inference rule. Params: { name: string, datalog: string }.
+  IMPORTANT: The Datalog result set MUST return exactly 5 columns: [from_id, to_id, relation_type, confidence, reason].
+  Use '$id' as placeholder for the start entity.
+  Available tables:
   - *entity{id, name, type, metadata, @ "NOW"}
   - *relationship{from_id, to_id, relation_type, strength, metadata, @ "NOW"}
   - *observation{id, entity_id, text, metadata, @ "NOW"}
-  Beispiel (Manager-Transitivität):
-  '?[from_id, to_id, relation_type, confidence, reason] := *relationship{from_id: $id, to_id: mid, relation_type: "manager_of", @ "NOW"}, *relationship{from_id: mid, to_id: target, relation_type: "manager_of", @ "NOW"}, from_id = $id, to_id = target, relation_type = "ober_manager_von", confidence = 0.6, reason = "Transitiver Manager-Pfad"'
-- 'ingest_file': Bulk-Import von Dokumenten (Markdown/JSON). Unterstützt Chunking (Absätze) und automatische Entitätserstellung. Params: { entity_id | entity_name (erforderlich), format, content, ... }. Ideal zum schnellen Befüllen des Speichers aus vorhandenen Notizen.
+  Example (Manager Transitivity):
+  '?[from_id, to_id, relation_type, confidence, reason] := *relationship{from_id: $id, to_id: mid, relation_type: "manager_of", @ "NOW"}, *relationship{from_id: mid, to_id: target, relation_type: "manager_of", @ "NOW"}, from_id = $id, to_id = target, relation_type = "ober_manager_von", confidence = 0.6, reason = "Transitive Manager Path"'
+- 'ingest_file': Bulk import of documents (Markdown/JSON). Supports chunking (paragraphs) and automatic entity creation. Params: { entity_id | entity_name (required), format, content, ... }. Ideal for quickly populating memory from existing notes.
 
-Validierung: Ungültige Syntax oder fehlende Spalten bei Inferenzregeln führen zu Fehlern.`,
+Validation: Invalid syntax or missing columns in inference rules will result in errors.`,
       parameters: MutateMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
-        console.error(`[mutate_memory] Aufruf mit:`, JSON.stringify(args, null, 2));
+        console.error(`[mutate_memory] Call with:`, JSON.stringify(args, null, 2));
         
-        // Zod discriminatedUnion ist streng. Wir versuchen es flexibler zu parsen.
+        // Zod discriminatedUnion is strict. We try to parse it more flexibly.
         const parsed = MutateMemorySchema.safeParse(args);
         if (!parsed.success) {
-          console.error(`[mutate_memory] Validierungsfehler:`, JSON.stringify(parsed.error.issues, null, 2));
+          console.error(`[mutate_memory] Validation error:`, JSON.stringify(parsed.error.issues, null, 2));
           
 
           
           return JSON.stringify({ 
-            error: "Ungültige Eingabe für action: " + args.action, 
+            error: "Invalid input for action: " + args.action, 
             issues: parsed.error.issues,
             received: args 
           });
@@ -2433,25 +2434,25 @@ Validierung: Ungültige Syntax oder fehlende Spalten bei Inferenzregeln führen 
         if (action === "delete_entity") return JSON.stringify(await this.deleteEntity({ entity_id: rest.entity_id }));
         if (action === "add_inference_rule") return JSON.stringify(await this.addInferenceRule(rest));
         if (action === "ingest_file") return JSON.stringify(await this.ingestFile(rest));
-        return JSON.stringify({ error: "Unbekannte action" });
+        return JSON.stringify({ error: "Unknown action" });
       },
     });
 
     const QueryMemorySchema = z.discriminatedUnion("action", [
       z.object({
         action: z.literal("search"),
-        query: z.string().describe("Suchanfrage"),
-        limit: z.number().optional().default(10).describe("Maximale Anzahl der Ergebnisse"),
-        entity_types: z.array(z.string()).optional().describe("Filter nach Entity-Typen"),
-        include_entities: z.boolean().optional().default(true).describe("Entities in Suche einbeziehen"),
-        include_observations: z.boolean().optional().default(true).describe("Observations in Suche einbeziehen"),
+        query: z.string().describe("Search query"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
+        entity_types: z.array(z.string()).optional().describe("Filter by entity types"),
+        include_entities: z.boolean().optional().default(true).describe("Include entities in search"),
+        include_observations: z.boolean().optional().default(true).describe("Include observations in search"),
       }),
       z.object({
         action: z.literal("advancedSearch"),
-        query: z.string().describe("Suchanfrage"),
-        limit: z.number().optional().default(10).describe("Maximale Anzahl der Ergebnisse"),
+        query: z.string().describe("Search query"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
         filters: z.object({
-          entityTypes: z.array(z.string()).optional().describe("Filter nach Entity-Typen"),
+          entityTypes: z.array(z.string()).optional().describe("Filter by entity types"),
           metadata: z.union([
             z.record(z.string(), z.any()),
             z.string().transform((str, ctx) => {
@@ -2462,91 +2463,91 @@ Validierung: Ungültige Syntax oder fehlende Spalten bei Inferenzregeln führen 
                 return z.NEVER;
               }
             })
-          ]).optional().describe("Filter nach Metadaten (exakte Übereinstimmung)"),
-        }).optional().describe("Filter für die Suche"),
+          ]).optional().describe("Filter by metadata (exact match)"),
+        }).optional().describe("Filters for the search"),
         graphConstraints: z.object({
-          requiredRelations: z.array(z.string()).optional().describe("Nur Entitäten mit diesen Beziehungstypen"),
-          targetEntityIds: z.array(z.string()).optional().describe("Nur Entitäten, die mit diesen Ziel-IDs verbunden sind"),
-        }).optional().describe("Graph-Einschränkungen"),
+          requiredRelations: z.array(z.string()).optional().describe("Only entities with these relationship types"),
+          targetEntityIds: z.array(z.string()).optional().describe("Only entities connected to these target IDs"),
+        }).optional().describe("Graph constraints"),
         vectorParams: z.object({
-          efSearch: z.number().optional().describe("HNSW Suchgenauigkeit"),
-        }).optional().describe("Vektor-Parameter"),
+          efSearch: z.number().optional().describe("HNSW search precision"),
+        }).optional().describe("Vector parameters"),
       }),
       z.object({
         action: z.literal("context"),
-        query: z.string().describe("Kontext-Anfrage"),
-        context_window: z.number().min(1).max(50).optional().default(20).describe("Anzahl der Kontext-Elemente"),
-        time_range_hours: z.number().optional().describe("Zeitfenster in Stunden"),
+        query: z.string().describe("Context query"),
+        context_window: z.number().min(1).max(50).optional().default(20).describe("Number of context items"),
+        time_range_hours: z.number().optional().describe("Time window in hours"),
       }),
       z.object({
         action: z.literal("entity_details"),
-        entity_id: z.string().describe("ID der Entität"),
-        as_of: z.string().optional().describe("Zeitpunkt für historische Abfrage (ISO-String oder 'NOW')"),
+        entity_id: z.string().describe("ID of the entity"),
+        as_of: z.string().optional().describe("Timestamp for historical query (ISO string or 'NOW')"),
       }),
       z.object({
         action: z.literal("history"),
-        entity_id: z.string().describe("ID der Entität"),
+        entity_id: z.string().describe("ID of the entity"),
       }),
       z.object({
         action: z.literal("graph_rag"),
-        query: z.string().describe("Suchanfrage für die initialen Vektor-Seeds"),
-        max_depth: z.number().min(1).max(3).optional().default(2).describe("Maximale Tiefe der Graph-Expansion (Standard: 2)"),
-        limit: z.number().optional().default(10).describe("Anzahl der initialen Vektor-Seeds"),
+        query: z.string().describe("Search query for initial vector seeds"),
+        max_depth: z.number().min(1).max(3).optional().default(2).describe("Maximum depth of graph expansion (Default: 2)"),
+        limit: z.number().optional().default(10).describe("Number of initial vector seeds"),
       }),
       z.object({
         action: z.literal("graph_walking"),
-        query: z.string().describe("Suchanfrage für die Relevanz-Prüfung"),
-        start_entity_id: z.string().optional().describe("Optionale Start-Entität (sonst wird via Vektor gesucht)"),
-        max_depth: z.number().min(1).max(5).optional().default(3).describe("Maximale Tiefe des Walking"),
-        limit: z.number().optional().default(5).describe("Anzahl der Ergebnisse"),
+        query: z.string().describe("Search query for relevance check"),
+        start_entity_id: z.string().optional().describe("Optional start entity (otherwise searched via vector)"),
+        max_depth: z.number().min(1).max(5).optional().default(3).describe("Maximum walking depth"),
+        limit: z.number().optional().default(5).describe("Number of results"),
       }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
         .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking"])
-        .describe("Aktion (bestimmt welche Felder erforderlich sind)"),
-      query: z.string().optional().describe("Für search/advancedSearch/context/graph_rag/graph_walking erforderlich"),
-      limit: z.number().optional().describe("Nur für search/advancedSearch/graph_rag/graph_walking"),
-      filters: z.any().optional().describe("Nur für advancedSearch"),
-      graphConstraints: z.any().optional().describe("Nur für advancedSearch"),
-      vectorOptions: z.any().optional().describe("Nur für advancedSearch"),
-      entity_types: z.array(z.string()).optional().describe("Nur für search"),
-      include_entities: z.boolean().optional().describe("Nur für search"),
-      include_observations: z.boolean().optional().describe("Nur für search"),
-      context_window: z.number().optional().describe("Nur für context"),
-      time_range_hours: z.number().optional().describe("Nur für context"),
-      entity_id: z.string().optional().describe("Für entity_details/history erforderlich"),
-      as_of: z.string().optional().describe("Nur für entity_details: ISO-String oder 'NOW'"),
-      max_depth: z.number().optional().describe("Nur für graph_rag/graph_walking: Maximale Expansionstiefe"),
-      start_entity_id: z.string().optional().describe("Nur für graph_walking: Start-Entität"),
+        .describe("Action (determines which fields are required)"),
+      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking"),
+      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking"),
+      filters: z.any().optional().describe("Only for advancedSearch"),
+      graphConstraints: z.any().optional().describe("Only for advancedSearch"),
+      vectorOptions: z.any().optional().describe("Only for advancedSearch"),
+      entity_types: z.array(z.string()).optional().describe("Only for search"),
+      include_entities: z.boolean().optional().describe("Only for search"),
+      include_observations: z.boolean().optional().describe("Only for search"),
+      context_window: z.number().optional().describe("Only for context"),
+      time_range_hours: z.number().optional().describe("Only for context"),
+      entity_id: z.string().optional().describe("Required for entity_details/history"),
+      as_of: z.string().optional().describe("Only for entity_details: ISO string or 'NOW'"),
+      max_depth: z.number().optional().describe("Only for graph_rag/graph_walking: Maximum expansion depth"),
+      start_entity_id: z.string().optional().describe("Only for graph_walking: Start entity"),
     });
 
     this.mcp.addTool({
       name: "query_memory",
-      description: `Lesezugriff auf das Gedächtnis. Wähle die Operation über 'action'.
-Unterstützte Aktionen:
-- 'search': Hybride Suche (Vektor + Keyword + Graph). Params: { query: string, limit?: number, entity_types?: string[], include_entities?: boolean, include_observations?: boolean }.
-  HINWEIS: Ergebnisse aus dem Benutzerprofil ('global_user_profile') erhalten automatisch einen Boost und werden bevorzugt angezeigt.
-- 'advancedSearch': Erweiterte Suche mit Metadaten-Filtern und Graph-Einschränkungen. Params: { query: string, limit?: number, filters?: { entityTypes?: string[], metadata?: object }, graphConstraints?: { requiredRelations?: string[], targetEntityIds?: string[] }, vectorOptions?: { topk?: number, efSearch?: number } }.
-- 'context': Ruft umfassenden Kontext ab. Params: { query: string, context_window?: number, time_range_hours?: number }. Liefert Entitäten, Beobachtungen, Graphen-Beziehungen und implizite Inferenz-Vorschläge.
-  HINWEIS: Das Benutzerprofil wird bei Relevanz automatisch in den Kontext einbezogen, um Personalisierung zu ermöglichen.
-- 'entity_details': Detailansicht einer Entität. Params: { entity_id: string, as_of?: string ('ISO-String' oder 'NOW') }.
-- 'history': Historische Entwicklung einer Entität abrufen. Params: { entity_id: string }.
-- 'graph_rag': Graph-basiertes Reasoning (Hybrid RAG). Findet erst semantische Vektor-Seeds und expandiert diese dann über Graph-Traversals. Ideal für Fragen, die Wissen über mehrere Ecken verknüpfen müssen. Params: { query: string, max_depth?: number, limit?: number }.
-- 'graph_walking': Rekursive semantische Graph-Suche. Startet bei Vektor-Seeds oder einer Entität und folgt Beziehungen zu anderen semantisch relevanten Entitäten. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
+      description: `Read access to memory. Select operation via 'action'.
+Supported actions:
+- 'search': Hybrid search (Vector + Keyword + Graph). Params: { query: string, limit?: number, entity_types?: string[], include_entities?: boolean, include_observations?: boolean }.
+  NOTE: Results from user profile ('global_user_profile') are automatically boosted and prioritized.
+- 'advancedSearch': Advanced search with metadata filters and graph constraints. Params: { query: string, limit?: number, filters?: { entityTypes?: string[], metadata?: object }, graphConstraints?: { requiredRelations?: string[], targetEntityIds?: string[] }, vectorOptions?: { topk?: number, efSearch?: number } }.
+- 'context': Retrieves comprehensive context. Params: { query: string, context_window?: number, time_range_hours?: number }. Returns entities, observations, graph relationships, and implicit inference suggestions.
+  NOTE: User profile is automatically included in context if relevant to enable personalization.
+- 'entity_details': Detailed view of an entity. Params: { entity_id: string, as_of?: string ('ISO-String' or 'NOW') }.
+- 'history': Retrieve historical evolution of an entity. Params: { entity_id: string }.
+- 'graph_rag': Graph-based reasoning (Hybrid RAG). Finds semantic vector seeds first, then expands via graph traversals. Ideal for multi-hop reasoning. Params: { query: string, max_depth?: number, limit?: number }.
+- 'graph_walking': Recursive semantic graph search. Starts at vector seeds or an entity and follows relationships to other semantically relevant entities. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
 
-Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSearch' eignen sich besser für gezielte Faktensuche.`,
+Notes: 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
         const parsed = QueryMemorySchema.safeParse(args);
-        if (!parsed.success) return JSON.stringify({ error: "Ungültige Eingabe", issues: parsed.error.issues });
+        if (!parsed.success) return JSON.stringify({ error: "Invalid input", issues: parsed.error.issues });
         const input = parsed.data as any;
 
         if (input.action === "search") {
           if (!input.query || input.query.trim().length === 0) {
-            return JSON.stringify({ error: "Suchanfrage darf nicht leer sein." });
+            return JSON.stringify({ error: "Search query must not be empty." });
           }
           const results = await this.hybridSearch.advancedSearch({
             query: input.query,
@@ -2586,7 +2587,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
 
         if (input.action === "advancedSearch") {
           if (!input.query || input.query.trim().length === 0) {
-            return JSON.stringify({ error: "Suchanfrage darf nicht leer sein." });
+            return JSON.stringify({ error: "Search query must not be empty." });
           }
           const results = await this.hybridSearch.advancedSearch({
             query: input.query,
@@ -2625,7 +2626,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
 
         if (input.action === "context") {
           if (!input.query || input.query.trim().length === 0) {
-            return JSON.stringify({ error: "Suchanfrage darf nicht leer sein." });
+            return JSON.stringify({ error: "Search query must not be empty." });
           }
           const searchResults = await this.hybridSearch.advancedSearch({
             query: input.query,
@@ -2676,7 +2677,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
                 });
               }
             } catch (e) {
-              console.error(`Fehler bei Graph-Expansion für ${entity.name}:`, e);
+              console.error(`Error during graph expansion for ${entity.name}:`, e);
             }
           }
 
@@ -2686,7 +2687,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
               const inferred = await this.inferenceEngine.inferImplicitRelations(entity.id);
               if (Array.isArray(inferred) && inferred.length > 0) inferred_relations.push(...inferred);
             } catch (e) {
-              console.error(`Fehler bei impliziter Inferenz für ${entity.name}:`, e);
+              console.error(`Error during implicit inference for ${entity.name}:`, e);
             }
           }
           const enriched_inferred_relations = await this.formatInferredRelationsForContext(inferred_relations);
@@ -2722,7 +2723,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
 
         if (input.action === "graph_rag") {
           if (!input.query || input.query.trim().length === 0) {
-            return JSON.stringify({ error: "Suchanfrage darf nicht leer sein." });
+            return JSON.stringify({ error: "Search query must not be empty." });
           }
           const results = await this.hybridSearch.graphRag({
             query: input.query,
@@ -2736,7 +2737,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
 
         if (input.action === "graph_walking") {
           if (!input.query || input.query.trim().length === 0) {
-            return JSON.stringify({ error: "Suchanfrage darf nicht leer sein." });
+            return JSON.stringify({ error: "Search query must not be empty." });
           }
           const results = await this.graph_walking({
             query: input.query,
@@ -2749,7 +2750,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
 
         if (input.action === "entity_details") {
           const validitySpec = this.resolveValiditySpec(input.as_of);
-          if (!validitySpec) return JSON.stringify({ error: "Ungültiges as_of-Format" });
+          if (!validitySpec) return JSON.stringify({ error: "Invalid as_of format" });
 
           let entityRes, obsRes, relOutRes;
 
@@ -2758,7 +2759,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
               `?[name, type, metadata] := *entity {id: $id, name, type, metadata, @ "NOW"}`,
               { id: input.entity_id },
             );
-            if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entität nicht gefunden" });
+            if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entity not found" });
 
             obsRes = await this.db.run(
               `?[text, metadata] := *observation {entity_id: $id, text, metadata, @ "NOW"}`,
@@ -2769,12 +2770,12 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
               { id: input.entity_id },
             );
           } else {
-            // Standard CozoDB @ Operator verwenden
+            // Use standard CozoDB @ operator
             entityRes = await this.db.run(
               `?[name, type, metadata] := *entity {id: $id, name, type, metadata, @ ${validitySpec}}`,
               { id: input.entity_id },
             );
-            if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entität nicht gefunden" });
+            if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entity not found" });
 
             obsRes = await this.db.run(
               `?[text, metadata] := *observation {entity_id: $id, text, metadata, @ ${validitySpec}}`,
@@ -2798,7 +2799,7 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
             `?[ts, asserted, name, type, metadata] := *entity{id: $id, name, type, metadata, created_at}, ts = to_int(created_at), asserted = to_bool(created_at) :order ts`,
             { id: input.entity_id },
           );
-          if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entität nicht gefunden" });
+          if (entityRes.rows.length === 0) return JSON.stringify({ error: "Entity not found" });
 
           const obsRes = await this.db.run(
             `?[ts, asserted, id, text, metadata] := *observation{id, entity_id: $id, text, metadata, created_at}, ts = to_int(created_at), asserted = to_bool(created_at) :order ts`,
@@ -2849,17 +2850,17 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
           });
         }
 
-        return JSON.stringify({ error: "Unbekannte action" });
+        return JSON.stringify({ error: "Unknown action" });
       },
     });
 
     const AnalyzeGraphSchema = z.discriminatedUnion("action", [
       z.object({
         action: z.literal("explore"),
-        start_entity: z.string().describe("Start-Entität ID"),
-        end_entity: z.string().optional().describe("Ziel-Entität ID"),
-        max_hops: z.number().min(1).max(5).optional().default(3).describe("Maximale Anzahl der Hops"),
-        relation_types: z.array(z.string()).optional().describe("Filter nach Beziehungstypen"),
+        start_entity: z.string().describe("Start entity ID"),
+        end_entity: z.string().optional().describe("Target entity ID"),
+        max_hops: z.number().min(1).max(5).optional().default(3).describe("Maximum number of hops"),
+        relation_types: z.array(z.string()).optional().describe("Filter by relationship types"),
       }),
       z.object({
         action: z.literal("communities"),
@@ -2878,26 +2879,26 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
       }),
       z.object({
         action: z.literal("shortest_path"),
-        start_entity: z.string().describe("Start-Entität ID"),
-        end_entity: z.string().describe("Ziel-Entität ID"),
+        start_entity: z.string().describe("Start entity ID"),
+        end_entity: z.string().describe("Target entity ID"),
       }),
       z.object({
         action: z.literal("bridge_discovery"),
       }),
       z.object({
         action: z.literal("infer_relations"),
-        entity_id: z.string().describe("ID der Entität"),
+        entity_id: z.string().describe("ID of the entity"),
       }),
       z.object({
         action: z.literal("get_relation_evolution"),
-        from_id: z.string().describe("ID der Quell-Entität"),
-        to_id: z.string().optional().describe("Optionale ID der Ziel-Entität (falls weggelassen, wird die Evolution aller ausgehenden Beziehungen der Quell-Entität gezeigt)"),
+        from_id: z.string().describe("ID of the source entity"),
+        to_id: z.string().optional().describe("Optional ID of the target entity (if omitted, evolution of all outgoing relationships of the source entity is shown)"),
       }),
       z.object({
         action: z.literal("semantic_walk"),
-        start_entity: z.string().describe("Start-Entität ID"),
-        max_depth: z.number().optional().default(3).describe("Maximale Tiefe (Default: 3)"),
-        min_similarity: z.number().optional().default(0.7).describe("Minimale Ähnlichkeit (0.0-1.0, Default: 0.7)"),
+        start_entity: z.string().describe("Start entity ID"),
+        max_depth: z.number().optional().default(3).describe("Maximum depth (Default: 3)"),
+        min_similarity: z.number().optional().default(0.7).describe("Minimum similarity (0.0-1.0, Default: 0.7)"),
       }),
       z.object({
         action: z.literal("hnsw_clusters"),
@@ -2907,54 +2908,54 @@ Hinweise: 'context' ist ideal für explorative Fragen. 'search' und 'advancedSea
     const AnalyzeGraphParameters = z.object({
       action: z
         .enum(["explore", "communities", "pagerank", "betweenness", "hits", "connected_components", "shortest_path", "bridge_discovery", "infer_relations", "get_relation_evolution", "semantic_walk", "hnsw_clusters"])
-        .describe("Aktion (bestimmt welche Felder erforderlich sind)"),
-      start_entity: z.string().optional().describe("Für explore/shortest_path/semantic_walk erforderlich (Start-Entität ID)"),
-      end_entity: z.string().optional().describe("Für explore (optional) / shortest_path (erforderlich)"),
-      max_hops: z.number().optional().describe("Optional für explore"),
-      relation_types: z.array(z.string()).optional().describe("Optional für explore"),
-      entity_id: z.string().optional().describe("Für infer_relations erforderlich"),
-      from_id: z.string().optional().describe("Für get_relation_evolution erforderlich"),
-      to_id: z.string().optional().describe("Optional für get_relation_evolution"),
-      max_depth: z.number().optional().describe("Optional für semantic_walk"),
-      min_similarity: z.number().optional().describe("Optional für semantic_walk"),
+        .describe("Action (determines which fields are required)"),
+      start_entity: z.string().optional().describe("Required for explore/shortest_path/semantic_walk (Start entity ID)"),
+      end_entity: z.string().optional().describe("Optional for explore / required for shortest_path"),
+      max_hops: z.number().optional().describe("Optional for explore"),
+      relation_types: z.array(z.string()).optional().describe("Optional for explore"),
+      entity_id: z.string().optional().describe("Required for infer_relations"),
+      from_id: z.string().optional().describe("Required for get_relation_evolution"),
+      to_id: z.string().optional().describe("Optional for get_relation_evolution"),
+      max_depth: z.number().optional().describe("Optional for semantic_walk"),
+      min_similarity: z.number().optional().describe("Optional for semantic_walk"),
     });
 
     this.mcp.addTool({
       name: "analyze_graph",
-      description: `Graphen-Analyse und fortgeschrittene Retrieval-Strategien. Wähle die Operation über 'action'.
-Unterstützte Aktionen:
-- 'explore': Navigiert durch den Graphen. Params: { start_entity: string, end_entity?: string, max_hops?: number, relation_types?: string[] }.
-  * Ohne end_entity: Liefert die Nachbarschaft (bis 5 Hops).
-  * Mit end_entity: Findet den kürzesten Pfad (BFS).
-- 'communities': Berechnet Entitäts-Gruppen (Communities) neu mittels Label Propagation.
-- 'pagerank': Berechnet die Wichtigkeit von Entitäten (Top 10).
-- 'betweenness': Findet zentrale Brücken-Entitäten (Betweenness Centrality).
-- 'hits': Identifiziert Hubs und Authorities.
-- 'connected_components': Identifiziert isolierte Teilgraphen.
-- 'shortest_path': Berechnet den kürzesten Pfad zwischen zwei Entitäten (Dijkstra). Params: { start_entity: string, end_entity: string }.
-- 'bridge_discovery': Identifiziert Brücken-Entitäten zwischen Communities.
-- 'infer_relations': Startet die Inferenz-Engine für eine Entität. Params: { entity_id: string }.
-- 'get_relation_evolution': Trackt die zeitliche Veränderung von Beziehungen. Params: { from_id: string, to_id?: string }.
-- 'semantic_walk': Führt einen rekursiven "Graph Walk" durch, der sowohl expliziten Beziehungen als auch semantischer Ähnlichkeit folgt. Params: { start_entity: string, max_depth?: number, min_similarity?: number }.
-- 'hnsw_clusters': Analysiert Cluster direkt auf dem HNSW-Graphen (Layer 0). Extrem schnell, da keine Vektorberechnungen nötig sind.`,
+      description: `Graph analysis and advanced retrieval strategies. Select operation via 'action'.
+Supported actions:
+- 'explore': Navigates through the graph. Params: { start_entity: string, end_entity?: string, max_hops?: number, relation_types?: string[] }.
+  * Without end_entity: Returns the neighborhood (up to 5 hops).
+  * With end_entity: Finds the shortest path (BFS).
+- 'communities': Recomputes entity groups (communities) using Label Propagation.
+- 'pagerank': Calculates the importance of entities (Top 10).
+- 'betweenness': Finds central bridge entities (Betweenness Centrality).
+- 'hits': Identifies Hubs and Authorities.
+- 'connected_components': Identifies isolated subgraphs.
+- 'shortest_path': Calculates the shortest path between two entities (Dijkstra). Params: { start_entity: string, end_entity: string }.
+- 'bridge_discovery': Identifies bridge entities between communities.
+- 'infer_relations': Starts the inference engine for an entity. Params: { entity_id: string }.
+- 'get_relation_evolution': Tracks the temporal evolution of relationships. Params: { from_id: string, to_id?: string }.
+- 'semantic_walk': Performs a recursive "Graph Walk" that follows both explicit relationships and semantic similarity. Params: { start_entity: string, max_depth?: number, min_similarity?: number }.
+- 'hnsw_clusters': Analyzes clusters directly on the HNSW graph (Layer 0). Extremely fast as no vector calculations are needed.`,
       parameters: AnalyzeGraphParameters,
       execute: async (args: any) => {
         await this.initPromise;
         const parsed = AnalyzeGraphSchema.safeParse(args);
-        if (!parsed.success) return JSON.stringify({ error: "Ungültige Eingabe", issues: parsed.error.issues });
+        if (!parsed.success) return JSON.stringify({ error: "Invalid input", issues: parsed.error.issues });
         const input = parsed.data as any;
 
         if (input.action === "infer_relations") {
           try {
-            // Prüfe ob Entität existiert
+            // Check if entity exists
             const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: input.entity_id });
             if (entityRes.rows.length === 0) {
-              return JSON.stringify({ error: `Entität mit ID '${input.entity_id}' nicht gefunden` });
+              return JSON.stringify({ error: `Entity with ID '${input.entity_id}' not found` });
             }
             const suggestions = await this.inferenceEngine.inferRelations(input.entity_id);
             return JSON.stringify({ entity_id: input.entity_id, suggestions });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei der Inferenz" });
+            return JSON.stringify({ error: error.message || "Error during inference" });
           }
         }
 
@@ -2964,7 +2965,7 @@ Unterstützte Aktionen:
             return JSON.stringify({ bridge_count: bridges.length, bridges });
           } catch (error: any) {
             console.error("Bridge Discovery Error:", error);
-            return JSON.stringify({ error: error.message || "Fehler bei der Bridge Discovery" });
+            return JSON.stringify({ error: error.message || "Error during bridge discovery" });
           }
         }
 
@@ -2989,7 +2990,7 @@ Unterstützte Aktionen:
             return JSON.stringify({ community_count: Object.keys(communities).length, communities });
           } catch (error: any) {
             console.error("Community Detection Error:", error);
-            return JSON.stringify({ error: error.message || "Fehler bei der Community Detection" });
+            return JSON.stringify({ error: error.message || "Error during community detection" });
           }
         }
 
@@ -3003,7 +3004,7 @@ Unterstützte Aktionen:
             });
           } catch (error: any) {
             console.error("PageRank Error:", error);
-            return JSON.stringify({ error: error.message || "Fehler bei der PageRank-Berechnung" });
+            return JSON.stringify({ error: error.message || "Error during PageRank calculation" });
           }
         }
 
@@ -3016,7 +3017,7 @@ Unterstützte Aktionen:
               top_centrality: results.sort((a: any, b: any) => b.centrality - a.centrality).slice(0, 10)
             });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei Betweenness Centrality" });
+            return JSON.stringify({ error: error.message || "Error during Betweenness Centrality" });
           }
         }
 
@@ -3030,7 +3031,7 @@ Unterstützte Aktionen:
               top_authorities: results.sort((a: any, b: any) => b.authority - a.authority).slice(0, 5)
             });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei HITS-Berechnung" });
+            return JSON.stringify({ error: error.message || "Error during HITS calculation" });
           }
         }
 
@@ -3047,7 +3048,7 @@ Unterstützte Aktionen:
               components: groups
             });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei Connected Components" });
+            return JSON.stringify({ error: error.message || "Error during Connected Components" });
           }
         }
 
@@ -3057,10 +3058,10 @@ Unterstützte Aktionen:
               start_entity: input.start_entity,
               end_entity: input.end_entity
             });
-            if (!result) return JSON.stringify({ error: "Kein Pfad gefunden" });
+            if (!result) return JSON.stringify({ error: "No path found" });
             return JSON.stringify(result);
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei Shortest Path" });
+            return JSON.stringify({ error: error.message || "Error during Shortest Path" });
           }
         }
 
@@ -3074,8 +3075,8 @@ Unterstützte Aktionen:
             });
             return JSON.stringify(result);
           } catch (error: any) {
-            console.error("Fehler bei Graph Traversal:", error);
-            return JSON.stringify({ error: "Graph Traversal fehlgeschlagen", details: error.message });
+            console.error("Error during Graph Traversal:", error);
+            return JSON.stringify({ error: "Graph Traversal failed", details: error.message });
           }
         }
 
@@ -3087,7 +3088,7 @@ Unterstützte Aktionen:
             // Fetch entity names for better output
             const fromEntityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: fromId });
             if (fromEntityRes.rows.length === 0) {
-              return JSON.stringify({ error: `Quell-Entität mit ID '${fromId}' nicht gefunden` });
+              return JSON.stringify({ error: `Source entity with ID '${fromId}' not found` });
             }
             const fromName = fromEntityRes.rows[0][0];
 
@@ -3097,7 +3098,7 @@ Unterstützte Aktionen:
             if (toId) {
               const toEntityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: toId });
               if (toEntityRes.rows.length === 0) {
-                return JSON.stringify({ error: `Ziel-Entität mit ID '${toId}' nicht gefunden` });
+                return JSON.stringify({ error: `Target entity with ID '${toId}' not found` });
               }
               params.to = toId;
               query = `
@@ -3144,11 +3145,11 @@ Unterstützte Aktionen:
               from_id: fromId,
               timeline: history,
               grouped_evolution: evolution,
-              description: "Zeigt die zeitliche Entwicklung von Beziehungen. 'ASSERTED' bedeutet die Beziehung wurde erstellt oder aktualisiert, 'RETRACTED' bedeutet sie wurde beendet/gelöscht."
+              description: "Shows the temporal evolution of relationships. 'ASSERTED' means the relationship was created or updated, 'RETRACTED' means it was ended/deleted."
             });
           } catch (error: any) {
-            console.error("Fehler bei Relation Evolution:", error);
-            return JSON.stringify({ error: error.message || "Fehler bei der Relation Evolution" });
+            console.error("Error during Relation Evolution:", error);
+            return JSON.stringify({ error: error.message || "Error during Relation Evolution" });
           }
         }
 
@@ -3161,11 +3162,11 @@ Unterstützte Aktionen:
             // Check if start entity exists
             const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: startEntityId });
             if (entityRes.rows.length === 0) {
-              return JSON.stringify({ error: `Start-Entität mit ID '${startEntityId}' nicht gefunden` });
+              return JSON.stringify({ error: `Start entity with ID '${startEntityId}' not found` });
             }
             const startName = entityRes.rows[0][0];
 
-            console.error(`[SemanticWalk] Starte Walk für '${startName}' (${startEntityId}) - Tiefe: ${maxDepth}, MinSim: ${minSimilarity}`);
+            console.error(`[SemanticWalk] Starting walk for '${startName}' (${startEntityId}) - Depth: ${maxDepth}, MinSim: ${minSimilarity}`);
             
             const results = await this.inferenceEngine.semanticGraphWalk(startEntityId, maxDepth, minSimilarity);
             
@@ -3188,8 +3189,8 @@ Unterstützte Aktionen:
               results: enrichedResults
             });
           } catch (error: any) {
-            console.error("Fehler bei Semantic Walk:", error);
-            return JSON.stringify({ error: error.message || "Fehler beim Semantic Walk" });
+            console.error("Error during Semantic Walk:", error);
+            return JSON.stringify({ error: error.message || "Error during Semantic Walk" });
           }
         }
 
@@ -3198,11 +3199,11 @@ Unterstützte Aktionen:
             const clusters = await this.inferenceEngine.analyzeHnswClusters();
             return JSON.stringify({ cluster_count: clusters.length, clusters });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei HNSW Cluster Analysis" });
+            return JSON.stringify({ error: error.message || "Error during HNSW Cluster Analysis" });
           }
         }
 
-        return JSON.stringify({ error: "Unbekannte action" });
+        return JSON.stringify({ error: "Unknown action" });
       },
     });
 
@@ -3210,17 +3211,17 @@ Unterstützte Aktionen:
       z.object({ action: z.literal("health") }),
       z.object({
         action: z.literal("snapshot_create"),
-        metadata: MetadataSchema.optional().describe("Zusätzliche Metadaten für den Snapshot"),
+        metadata: MetadataSchema.optional().describe("Additional metadata for the snapshot"),
       }),
       z.object({ action: z.literal("snapshot_list") }),
       z.object({
         action: z.literal("snapshot_diff"),
-        snapshot_id_a: z.string().describe("Erster Snapshot"),
-        snapshot_id_b: z.string().describe("Zweiter Snapshot"),
+        snapshot_id_a: z.string().describe("First snapshot"),
+        snapshot_id_b: z.string().describe("Second snapshot"),
       }),
       z.object({
         action: z.literal("cleanup"),
-        confirm: z.boolean().describe("Muss true sein, um die Bereinigung zu bestätigen"),
+        confirm: z.boolean().describe("Must be true to confirm cleanup"),
         older_than_days: z.number().min(1).max(3650).optional().default(30),
         max_observations: z.number().min(1).max(200).optional().default(20),
         min_entity_degree: z.number().min(0).max(100).optional().default(2),
@@ -3228,48 +3229,48 @@ Unterstützte Aktionen:
       }),
       z.object({
         action: z.literal("reflect"),
-        entity_id: z.string().optional().describe("Optionale Entität-ID für gezielte Reflexion"),
+        entity_id: z.string().optional().describe("Optional entity ID for targeted reflection"),
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
       }),
       z.object({
         action: z.literal("clear_memory"),
-        confirm: z.boolean().describe("Muss true sein, um die Löschung zu bestätigen"),
+        confirm: z.boolean().describe("Must be true to confirm deletion"),
       }),
     ]);
 
     const ManageSystemParameters = z.object({
       action: z
         .enum(["health", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory"])
-        .describe("Aktion (bestimmt welche Felder erforderlich sind)"),
-      snapshot_id_a: z.string().optional().describe("Für snapshot_diff erforderlich"),
-      snapshot_id_b: z.string().optional().describe("Für snapshot_diff erforderlich"),
-      metadata: MetadataSchema.optional().describe("Optional für snapshot_create"),
-      confirm: z.boolean().optional().describe("Für cleanup/clear_memory erforderlich und muss true sein"),
-      older_than_days: z.number().optional().describe("Optional für cleanup"),
-      max_observations: z.number().optional().describe("Optional für cleanup"),
-      min_entity_degree: z.number().optional().describe("Optional für cleanup"),
-      model: z.string().optional().describe("Optional für cleanup/reflect"),
-      entity_id: z.string().optional().describe("Optional für reflect"),
+        .describe("Action (determines which fields are required)"),
+      snapshot_id_a: z.string().optional().describe("Required for snapshot_diff"),
+      snapshot_id_b: z.string().optional().describe("Required for snapshot_diff"),
+      metadata: MetadataSchema.optional().describe("Optional for snapshot_create"),
+      confirm: z.boolean().optional().describe("Required for cleanup/clear_memory and must be true"),
+      older_than_days: z.number().optional().describe("Optional for cleanup"),
+      max_observations: z.number().optional().describe("Optional for cleanup"),
+      min_entity_degree: z.number().optional().describe("Optional for cleanup"),
+      model: z.string().optional().describe("Optional for cleanup/reflect"),
+      entity_id: z.string().optional().describe("Optional for reflect"),
     });
 
     this.mcp.addTool({
       name: "manage_system",
-      description: `System-Wartung und Speicher-Management. Wähle die Operation über 'action'.
-Unterstützte Aktionen:
-- 'health': Statusprüfung. Liefert DB-Counts und Embedding-Cache-Statistiken.
-- 'snapshot_create': Erstellt einen Backup-Punkt. Params: { metadata?: object }.
-- 'snapshot_list': Listet alle verfügbaren Snapshots auf.
-- 'snapshot_diff': Vergleicht zwei Snapshots. Params: { snapshot_id_a: string, snapshot_id_b: string }.
-- 'cleanup': Janitor-Service zur Konsolidierung. Params: { confirm: boolean, older_than_days?: number, max_observations?: number, min_entity_degree?: number, model?: string }.
-  * Bei confirm=false: Dry-Run (zeigt Kandidaten).
-  * Bei confirm=true: Fasst alte/isolierte Fragmente mittels LLM zusammen (Executive Summary) und löscht Rauschen.
-- 'reflect': Reflexions-Service. Analysiert Memory auf Widersprüche und Einsichten. Params: { entity_id?: string, model?: string }.
-- 'clear_memory': Setzt die gesamte Datenbank zurück. Params: { confirm: boolean (muss true sein) }.`,
+      description: `System maintenance and memory management. Select operation via 'action'.
+Supported actions:
+- 'health': Status check. Returns DB counts and embedding cache statistics.
+- 'snapshot_create': Creates a backup point. Params: { metadata?: object }.
+- 'snapshot_list': Lists all available snapshots.
+- 'snapshot_diff': Compares two snapshots. Params: { snapshot_id_a: string, snapshot_id_b: string }.
+- 'cleanup': Janitor service for consolidation. Params: { confirm: boolean, older_than_days?: number, max_observations?: number, min_entity_degree?: number, model?: string }.
+  * With confirm=false: Dry-Run (shows candidates).
+  * With confirm=true: Merges old/isolated fragments using LLM (Executive Summary) and removes noise.
+- 'reflect': Reflection service. Analyzes memory for contradictions and insights. Params: { entity_id?: string, model?: string }.
+- 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.`,
       parameters: ManageSystemParameters,
       execute: async (args: any) => {
         await this.initPromise;
         const parsed = ManageSystemSchema.safeParse(args);
-        if (!parsed.success) return JSON.stringify({ error: "Ungültige Eingabe", issues: parsed.error.issues });
+        if (!parsed.success) return JSON.stringify({ error: "Invalid input", issues: parsed.error.issues });
         const input = parsed.data as any;
 
         if (input.action === "health") {
@@ -3297,7 +3298,7 @@ Unterstützte Aktionen:
 
         if (input.action === "snapshot_create") {
           try {
-            // Optimierung: Sequentielle Ausführung und Count-Aggregation statt Full-Fetch
+            // Optimization: Sequential execution and count aggregation instead of full fetch
             const entityResult = await this.db.run('?[count(id)] := *entity{id, @ "NOW"}');
             const obsResult = await this.db.run('?[count(id)] := *observation{id, @ "NOW"}');
             const relResult = await this.db.run('?[count(from_id)] := *relationship{from_id, to_id, @ "NOW"}');
@@ -3322,9 +3323,9 @@ Unterstützte Aktionen:
               },
             );
 
-            return JSON.stringify({ snapshot_id, ...counts, status: "Snapshot erstellt" });
+            return JSON.stringify({ snapshot_id, ...counts, status: "Snapshot created" });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler beim Erstellen des Snapshots" });
+            return JSON.stringify({ error: error.message || "Error creating snapshot" });
           }
         }
 
@@ -3344,7 +3345,7 @@ Unterstützte Aktionen:
               })),
             );
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler beim Auflisten der Snapshots" });
+            return JSON.stringify({ error: error.message || "Error listing snapshots" });
           }
         }
 
@@ -3363,7 +3364,7 @@ Unterstützte Aktionen:
 
             if (aRes.rows.length === 0 || bRes.rows.length === 0) {
               return JSON.stringify({
-                error: "Snapshot nicht gefunden",
+                error: "Snapshot not found",
                 missing: {
                   snapshot_id_a: aRes.rows.length === 0 ? input.snapshot_id_a : undefined,
                   snapshot_id_b: bRes.rows.length === 0 ? input.snapshot_id_b : undefined,
@@ -3391,7 +3392,7 @@ Unterstützte Aktionen:
               metadata: { a: a[4], b: b[4] },
             });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler beim Diff der Snapshots" });
+            return JSON.stringify({ error: error.message || "Error during snapshot diff" });
           }
         }
 
@@ -3406,7 +3407,7 @@ Unterstützte Aktionen:
             });
             return JSON.stringify(result);
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler beim Cleanup" });
+            return JSON.stringify({ error: error.message || "Error during cleanup" });
           }
         }
 
@@ -3418,13 +3419,13 @@ Unterstützte Aktionen:
             });
             return JSON.stringify(result);
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler bei der Reflexion" });
+            return JSON.stringify({ error: error.message || "Error during reflection" });
           }
         }
 
         if (input.action === "clear_memory") {
           if (!input.confirm) {
-            return JSON.stringify({ error: "Löschung nicht bestätigt. Setzen Sie 'confirm' auf true." });
+            return JSON.stringify({ error: "Deletion not confirmed. Set 'confirm' to true." });
           }
 
           try {
@@ -3434,27 +3435,27 @@ Unterstützte Aktionen:
               { ?[id, created_at] := *entity{id, created_at} :rm entity {id, created_at} }
             `);
 
-            return JSON.stringify({ status: "Gedächtnis vollständig geleert" });
+            return JSON.stringify({ status: "Memory completely cleared" });
           } catch (error: any) {
-            return JSON.stringify({ error: error.message || "Fehler beim Leeren des Gedächtnisses" });
+            return JSON.stringify({ error: error.message || "Error clearing memory" });
           }
         }
 
-        return JSON.stringify({ error: "Unbekannte action" });
+        return JSON.stringify({ error: "Unknown action" });
       },
     });
   }
 
   public async start() {
     await this.mcp.start({ transportType: "stdio" });
-    console.error("Cozo Memory MCP Server läuft auf stdio");
+    console.error("Cozo Memory MCP Server running on stdio");
   }
 }
 
 if (require.main === module) {
   const server = new MemoryServer();
   server.start().catch((err) => {
-    console.error("Server konnte nicht gestartet werden:", err);
+    console.error("Server could not be started:", err);
     process.exit(1);
   });
 }

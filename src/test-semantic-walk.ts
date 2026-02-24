@@ -17,11 +17,11 @@ async function runTest() {
   );
 
   try {
-    console.log("Verbinde zum MCP-Server für Semantic Walk Test...");
+    console.log("Connecting to MCP server for Semantic Walk Test...");
     await client.connect(transport);
-    console.log("Verbunden!");
+    console.log("Connected!");
 
-    console.log("\n1. Bereite Test-Daten vor...");
+    console.log("\n1. Preparing test data...");
     
     // Cleanup
     await client.callTool({
@@ -29,25 +29,25 @@ async function runTest() {
       arguments: { action: "clear_memory", confirm: true }
     });
 
-    // Erstelle Entitäten
-    // Wir wollen Pfade testen:
-    // A (Start) -> B (Explizit)
-    // A (Start) ~ C (Semantisch)
-    // B -> D (Explizit) => A -> B -> D (Explizit Pfad Tiefe 2)
-    // B ~ E (Semantisch) => A -> B ~ E (Mixed Pfad)
+    // Create entities
+    // We want to test paths:
+    // A (Start) -> B (Explicit)
+    // A (Start) ~ C (Semantic)
+    // B -> D (Explicit) => A -> B -> D (Explicit Path Depth 2)
+    // B ~ E (Semantic) => A -> B ~ E (Mixed Path)
     
     const entities = [
-      { name: "Apfel", type: "Fruit", text: "Ein roter Apfel, eine beliebte Frucht." }, // Start
-      { name: "Obstbaum", type: "Plant", text: "Ein Baum an dem Früchte wachsen." }, // Verbunden mit Apfel
-      { name: "Birne", type: "Fruit", text: "Eine grüne Birne, ähnlich wie ein Apfel." }, // Semantisch ähnlich zu Apfel
-      { name: "Garten", type: "Location", text: "Ein Ort wo Pflanzen wachsen." }, // Verbunden mit Obstbaum
-      { name: "Banane", type: "Fruit", text: "Eine gelbe krumme Frucht." }, // Semantisch ähnlich zu Birne (und Apfel?)
-      { name: "Birnenbaum", type: "Plant", text: "Ein Baum an dem Birnen wachsen." } // Mixed Path Test
+      { name: "Apple", type: "Fruit", text: "A red apple, a popular fruit." }, // Start
+      { name: "Fruit Tree", type: "Plant", text: "A tree where fruits grow." }, // Connected to Apple
+      { name: "Pear", type: "Fruit", text: "A green pear, similar to an apple." }, // Semantically similar to Apple
+      { name: "Garden", type: "Location", text: "A place where plants grow." }, // Connected to Fruit Tree
+      { name: "Banana", type: "Fruit", text: "A yellow curved fruit." }, // Semantically similar to Pear (and Apple?)
+      { name: "Pear Tree", type: "Plant", text: "A tree where pears grow." } // Mixed Path Test
     ];
 
     const entityIds: Record<string, string> = {};
 
-    console.log("Erstelle Entitäten...");
+    console.log("Creating entities...");
     for (const ent of entities) {
       const res: any = await client.callTool({
         name: "mutate_memory",
@@ -65,93 +65,93 @@ async function runTest() {
       console.log(`  - ${ent.name}: ${id}`);
     }
 
-    // Beziehungen erstellen
-    console.log("\nErstelle Beziehungen...");
+    // Creating relationships
+    console.log("\nCreating relationships...");
     
-    // Apfel -> wächst an -> Obstbaum (Explizit)
+    // Apple -> grows on -> Fruit Tree (Explicit)
     await client.callTool({
       name: "mutate_memory",
       arguments: {
         action: "create_relation",
-        from_id: entityIds["Apfel"],
-        to_id: entityIds["Obstbaum"],
+        from_id: entityIds["Apple"],
+        to_id: entityIds["Fruit Tree"],
         relation_type: "grows_on",
         strength: 1.0
       }
     });
 
-    // Obstbaum -> steht in -> Garten (Explizit)
+    // Fruit Tree -> located in -> Garden (Explicit)
     await client.callTool({
       name: "mutate_memory",
       arguments: {
         action: "create_relation",
-        from_id: entityIds["Obstbaum"],
-        to_id: entityIds["Garten"],
+        from_id: entityIds["Fruit Tree"],
+        to_id: entityIds["Garden"],
         relation_type: "located_in",
         strength: 1.0
       }
     });
 
-    // Birne -> wächst an -> Birnenbaum (Explizit)
+    // Pear -> grows on -> Pear Tree (Explicit)
     await client.callTool({
       name: "mutate_memory",
       arguments: {
         action: "create_relation",
-        from_id: entityIds["Birne"],
-        to_id: entityIds["Birnenbaum"],
+        from_id: entityIds["Pear"],
+        to_id: entityIds["Pear Tree"],
         relation_type: "grows_on",
         strength: 1.0
       }
     });
 
-    console.log("Daten vorbereitet.");
+    console.log("Data prepared.");
 
-    // Test 1: Semantic Walk ab "Apfel"
-    console.log("\n2. Starte Semantic Graph Walk (Start: Apfel)...");
+    // Test 1: Semantic Walk from "Apple"
+    console.log("\n2. Starting Semantic Graph Walk (Start: Apple)...");
     
     const walkRes: any = await client.callTool({
       name: "analyze_graph",
       arguments: {
         action: "semantic_walk",
-        start_entity: entityIds["Apfel"],
+        start_entity: entityIds["Apple"],
         max_depth: 3,
-        min_similarity: 0.6 // Etwas niedriger für den Test
+        min_similarity: 0.6 // Slightly lower for the test
       }
     });
 
     const result = JSON.parse(walkRes.content[0].text);
-    console.log(`\nGefundene Entitäten: ${result.found_entities}`);
+    console.log(`\nFound entities: ${result.found_entities}`);
     
-    console.log("\nErgebnisse:");
+    console.log("\nResults:");
     const foundNames = new Set();
     
     for (const r of result.results) {
       console.log(`- ${r.entity_name} (${r.entity_type})`);
-      console.log(`  Tiefe: ${r.distance}, Score: ${r.path_score.toFixed(3)}, Typ: ${r.path_type}`);
+      console.log(`  Depth: ${r.distance}, Score: ${r.path_score.toFixed(3)}, Type: ${r.path_type}`);
       foundNames.add(r.entity_name);
     }
 
-    // Validierung
-    console.log("\nValidierung:");
+    // Validation
+    console.log("\nValidation:");
     
-    // 1. Obstbaum sollte gefunden werden (Explicit, Tiefe 1)
-    if (foundNames.has("Obstbaum")) console.log("✅ Obstbaum gefunden (Explizit)");
-    else console.error("❌ Obstbaum NICHT gefunden");
+    // 1. Fruit Tree should be found (Explicit, Depth 1)
+    if (foundNames.has("Fruit Tree")) console.log("✅ Fruit Tree found (Explicit)");
+    else console.error("❌ Fruit Tree NOT found");
 
-    // 2. Birne sollte gefunden werden (Semantisch, Tiefe 1)
-    if (foundNames.has("Birne")) console.log("✅ Birne gefunden (Semantisch)");
-    else console.error("❌ Birne NICHT gefunden (Vielleicht Embedding-Problem?)");
+    // 2. Pear should be found (Semantic, Depth 1)
+    if (foundNames.has("Pear")) console.log("✅ Pear found (Semantic)");
+    else console.error("❌ Pear NOT found (Maybe embedding problem?)");
 
-    // 3. Garten sollte gefunden werden (Explicit Pfad: Apfel -> Obstbaum -> Garten, Tiefe 2)
-    if (foundNames.has("Garten")) console.log("✅ Garten gefunden (Transitiv Explizit)");
-    else console.error("❌ Garten NICHT gefunden");
+    // 3. Garden should be found (Explicit Path: Apple -> Fruit Tree -> Garden, Depth 2)
+    if (foundNames.has("Garden")) console.log("✅ Garden found (Transitive Explicit)");
+    else console.error("❌ Garden NOT found");
 
-    // 4. Banane könnte gefunden werden (Semantisch oder Mixed)
-    if (foundNames.has("Banane")) console.log("✅ Banane gefunden");
-    else console.log("ℹ️ Banane nicht gefunden (OK, hängt von Similarity ab)");
+    // 4. Banana could be found (Semantic or Mixed)
+    if (foundNames.has("Banana")) console.log("✅ Banana found");
+    else console.log("ℹ️ Banana not found (OK, depends on Similarity)");
 
   } catch (error) {
-    console.error("Test fehlgeschlagen:", error);
+    console.error("Test failed:", error);
   } finally {
     await transport.close();
     process.exit(0);

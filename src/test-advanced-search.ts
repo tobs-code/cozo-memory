@@ -2,103 +2,93 @@
 import { MemoryServer } from './index';
 
 async function main() {
-    // MemoryServer erwartet einen Pfad-String, .db wird automatisch angehängt
-    const memory = new MemoryServer('memory_test');
+  const memory = new MemoryServer();
 
-    try {
-        // Warten auf Initialisierung
-        await memory.initPromise;
-        console.log("--- Testdaten hinzufügen ---");
+  // Wait for initialization
+  await memory.initPromise;
 
-        // 1. Entitäten erstellen
-        const alice = await memory.createEntity({
-            name: "Alice",
-            type: "Person",
-            metadata: { role: "Developer", expertise: "TypeScript" }
-        });
-        const bob = await memory.createEntity({
-            name: "Bob",
-            type: "Person",
-            metadata: { role: "Manager", expertise: "Agile" }
-        });
-        const projectX = await memory.createEntity({
-            name: "Projekt X",
-            type: "Projekt",
-            metadata: { status: "Aktiv" }
-        });
+  console.log("--- Adding Test Data ---");
+  const alice = await memory.createEntity({
+    name: "Alice",
+    type: "Person",
+    metadata: { role: "engineer", expertise: "TypeScript" }
+  }) as any;
+  
+  const bob = await memory.createEntity({
+    name: "Bob",
+    type: "Person",
+    metadata: { role: "manager", expertise: "Agile" }
+  }) as any;
 
-        console.log("Entitäten erstellt:", { alice: alice.id, bob: bob.id, projectX: projectX.id });
+  const projectX = await memory.createEntity({
+    name: "Project X",
+    type: "Project",
+    metadata: { status: "Active" }
+  }) as any;
 
-        // 2. Beobachtungen hinzufügen (addObservation nutzt 'text')
-        await memory.addObservation({
-            entity_id: alice.id,
-            text: "Alice arbeitet an Projekt X.",
-            metadata: { type: "work" }
-        });
-        await memory.addObservation({
-            entity_id: bob.id,
-            text: "Bob leitet Projekt X.",
-            metadata: { type: "management" }
-        });
+  // Use id instead of entity_id
+  await memory.createRelation({
+    from_id: alice.id,
+    to_id: projectX.id,
+    relation_type: "WORKS_ON",
+  });
+  await memory.createRelation({
+    from_id: bob.id,
+    to_id: projectX.id,
+    relation_type: "WORKS_ON",
+  });
 
-        console.log("\n--- Suche 1: Einfache Suche nach Alice ---");
-        const res1 = await memory.advancedSearch({
-            query: "Wer ist Alice?",
-            limit: 2
-        });
-        console.log("Ergebnisse 1:", JSON.stringify(res1, null, 2));
+  await memory.addObservation({
+    entity_id: alice.id,
+    text: "Alice is a software engineer working on Project X.",
+  });
+  await memory.addObservation({
+    entity_id: bob.id,
+    text: "Bob is a project manager for Project X.",
+  });
 
-        console.log("\n--- Suche 2: Filter auf Typ 'Person' ---");
-        const res2 = await memory.advancedSearch({
-            query: "Projektmitarbeiter",
-            limit: 5,
-            filters: {
-                entityTypes: ["Person"]
-            }
-        });
-        console.log("Ergebnisse 2:", JSON.stringify(res2, null, 2));
+  console.log("Entities created:", { alice: alice.id, bob: bob.id, projectX: projectX.id });
 
-        console.log("\n--- Suche 3: Filter auf Metadaten ---");
-        const res3 = await memory.advancedSearch({
-            query: "Entwickler",
-            limit: 5,
-            filters: {
-                metadata: { role: "Developer" }
-            }
-        });
-        console.log("Ergebnisse 3:", JSON.stringify(res3, null, 2));
+  console.log("\n--- Search 1: Simple Search for Alice ---");
+  // Use advancedSearch
+  const res1 = await memory.advancedSearch({
+    query: "Alice engineer",
+    limit: 5,
+  });
+  console.log("Results 1:", JSON.stringify(res1, null, 2));
 
-        console.log("\n--- Suche 4: Graph-Constraints (Relationen) ---");
-        // Wir erstellen eine Relation zwischen Alice und Bob
-        await memory.createRelation({
-            from_id: alice.id!,
-            to_id: bob.id!,
-            relation_type: "works_with",
-            strength: 1.0
-        });
+  console.log("\n--- Search 2: Filter by Type 'Person' ---");
+  const res2 = await memory.advancedSearch({
+    query: "engineer",
+    filters: {
+      entityTypes: ["Person"],
+    },
+  });
+  console.log("Results 2:", JSON.stringify(res2, null, 2));
 
-        const res4 = await memory.advancedSearch({
-            query: "Manager",
-            limit: 5,
-            graphConstraints: {
-                requiredRelations: ["works_with"]
-            }
-        });
-        console.log("Ergebnisse 4:", JSON.stringify(res4, null, 2));
+  console.log("\n--- Search 3: Filter by Metadata ---");
+  const res3 = await memory.advancedSearch({
+    query: "Alice",
+    filters: {
+      metadata: {
+        role: "engineer",
+      },
+    },
+  });
+  console.log("Results 3:", JSON.stringify(res3, null, 2));
 
-        console.log("\n--- Suche 5: Graph-Constraints (Target IDs) ---");
-        const res5 = await memory.advancedSearch({
-            query: "Entwickler",
-            limit: 5,
-            graphConstraints: {
-                targetEntityIds: [bob.id!]
-            }
-        });
-        console.log("Ergebnisse 5:", JSON.stringify(res5, null, 2));
-
-    } catch (error) {
-        console.error("Fehler im Test:", error);
-    }
+  console.log("\n--- Search 4: Graph Constraints (Relations) ---");
+  // Find people who work on Project X
+  const res4 = await memory.advancedSearch({
+    query: "Project X",
+    graphConstraints: {
+      requiredRelations: ["WORKS_ON"],
+      maxDepth: 1,
+    },
+  });
+  console.log("Results 4:", JSON.stringify(res4, null, 2));
 }
 
-main();
+main().catch((error) => {
+  console.log("Error in test:", error);
+});
