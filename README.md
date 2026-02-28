@@ -28,6 +28,7 @@
 - [Development](#development)
 - [User Preference Profiling](#user-preference-profiling-mem0-style)
 - [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## Quick Start
@@ -783,6 +784,15 @@ npx ts-node test-user-pref.ts
 - First query after restart is slower (cold cache)
 - Use `health` action to check cache hit rates
 - Consider RocksDB backend for datasets > 100k entities
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+
+- Setting up the development environment
+- Coding standards and best practices
+- Testing and documentation requirements
+- Pull request process
 
 ## License
 
