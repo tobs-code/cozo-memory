@@ -4,7 +4,18 @@
       "command": "node",
       "args": [
         "/path/to/cozo-memory/dist/index.js"
-      ]
+      ],
+      "env": {
+        "EMBEDDING_MODEL": "Xenova/all-MiniLM-L6-v2"
+      }
     }
   }
 }
+
+---
+
+embeeding models:  
+
+Xenova/bge-m3 - (Standard, 1.7 GB RAM)
+Xenova/all-MiniLM-L6-v2 - (Lightweight, 400 MB RAM)
+bge-small-en-v1.5 - (Balanced, 600 MB RAM)

@@ -11,8 +11,6 @@ import { InferenceEngine } from "./inference-engine";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
 const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
-const EMBEDDING_MODEL = "Xenova/bge-m3";
-const EMBEDDING_DIM = 1024;
 
 export const USER_ENTITY_ID = "global_user_profile";
 export const USER_ENTITY_NAME = "The User";
@@ -556,6 +554,10 @@ export class MemoryServer {
   private async setupSchema() {
     try {
       console.error("[Schema] Initializing schema...");
+      
+      // Get embedding dimensions from service
+      const EMBEDDING_DIM = this.embeddingService.getDimensions();
+      console.error(`[Schema] Using embedding dimensions: ${EMBEDDING_DIM}`);
       
       const existingRelations = await this.db.run("::relations");
       const relations = existingRelations.rows.map((r: any) => r[0]);

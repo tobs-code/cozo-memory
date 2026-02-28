@@ -88,6 +88,11 @@ export class EmbeddingService {
     console.log(`[EmbeddingService] Using model: ${this.modelId} (${this.dimensions} dimensions)`);
   }
 
+  // Public getter for dimensions
+  getDimensions(): number {
+    return this.dimensions;
+  }
+
   // Serializes embedding execution to avoid event loop blocking
   private async runSerialized<T>(task: () => Promise<T>): Promise<T> {
     // Chain the task to the queue
