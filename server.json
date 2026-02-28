@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tobs-code/cozo-memory",
+  "description": "Local-first memory system for AI agents with hybrid search and graph reasoning",
+  "longDescription": "CozoDB Memory is a production-ready, local-first persistent memory system for AI agents that combines the power of graph databases, vector search, and full-text indexing in a single embedded solution. Built on CozoDB with no external dependencies, it provides intelligent knowledge retrieval through hybrid search that fuses semantic similarity (HNSW), keyword matching (FTS), and graph algorithms via Reciprocal Rank Fusion (RRF).\n\nKey capabilities include Graph-RAG for multi-hop reasoning across knowledge networks, time-travel queries using CozoDB Validity for historical data access, and a two-tier semantic caching system (L1 memory + L2 persistent) for sub-millisecond response times. The system automatically detects near-duplicates using LSH MinHash, maintains user preference profiles with automatic search boosting, and includes a Janitor service for LLM-backed memory consolidation.\n\nAdvanced features: Multi-vector support (content + name embeddings), graph algorithms (PageRank, Betweenness Centrality, HITS, Community Detection), inference engine for implicit knowledge discovery, conflict detection for contradictory information, and atomic transactions across multiple operations. All embeddings are generated locally via ONNX (Xenova/bge-m3, 1024 dimensions) with no cloud dependencies.\n\nPerfect for AI agents requiring sophisticated memory management with graph reasoning capabilities, supporting both SQLite (simple deployment) and RocksDB (high-performance) backends. Includes optional HTTP API bridge for external integrations.\n\nBenchmarks: ~130ms Graph-Walking, ~35ms Hybrid Search (cold), <0.1ms with cache hit, ~102ms ingestion per operation.",
+  "repository": {
+    "url": "https://github.com/tobs-code/cozo-memory",
+    "source": "github"
+  },
+  "version": "1.0.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "cozo-memory",
+      "version": "1.0.3",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ],
+  "tags": [
+    "memory",
+    "graph-database",
+    "vector-search",
+    "hybrid-search",
+    "embeddings",
+    "knowledge-graph",
+    "cozodb",
+    "rag",
+    "graph-rag",
+    "time-travel",
+    "semantic-search",
+    "local-first"
+  ]
+}

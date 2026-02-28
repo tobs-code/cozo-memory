@@ -39,6 +39,12 @@ web-ui/
 *.db
 *.cozo.db
 
+# MCP Publisher tokens and binaries
+.mcpregistry_*
+mcp-publisher.exe
+mcp-publisher.tar.gz
+mcp-publisher
+
 # Cache
 .cache/
 
