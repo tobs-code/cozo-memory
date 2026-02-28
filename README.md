@@ -1,8 +1,34 @@
 # CozoDB Memory MCP Server
 
-Persistent, local-first memory for AI agents. No cloud, no Docker, no external services – just CozoDB embedded in Node.js.
+[![npm](https://img.shields.io/npm/v/cozo-memory)](https://www.npmjs.com/package/cozo-memory)
+[![Node](https://img.shields.io/node/v/cozo-memory)](https://nodejs.org)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-A local, single-user memory system based on CozoDB with MCP (Model Context Protocol) integration. Focus: robust storage, fast hybrid search (Vector/Graph/Keyword), time-travel queries, and maintainable consolidation.
+**Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – all in a single binary, no cloud, no Docker.**
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Key Features](#key-features)
+- [Positioning & Comparison](#positioning--comparison)
+- [Performance & Benchmarks](#performance--benchmarks)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Start / Integration](#start--integration)
+- [Configuration & Backends](#configuration--backends)
+- [Data Model](#data-model)
+- [MCP Tools](#mcp-tools)
+  - [mutate_memory (Write)](#mutate_memory-write)
+  - [query_memory (Read)](#query_memory-read)
+  - [analyze_graph (Analysis)](#analyze_graph-analysis)
+  - [manage_system (Maintenance)](#manage_system-maintenance)
+- [Production Monitoring](#production-monitoring)
+- [Technical Highlights](#technical-highlights)
+- [Optional: HTTP API Bridge](#optional-http-api-bridge)
+- [Development](#development)
+- [User Preference Profiling](#user-preference-profiling-mem0-style)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## Quick Start
 
@@ -27,13 +53,35 @@ npm run start
 
 Now you can add the server to your MCP client (e.g. Claude Desktop).
 
-## Overview
+## Key Features
 
-This repository contains:
-- An MCP server (stdio) for Claude/other MCP clients.
-- An optional HTTP API bridge server for UI/tools.
+🔍 **Hybrid Search (since v0.7)** - Combines semantic search (HNSW), full-text search (FTS), and graph signals via Reciprocal Rank Fusion (RRF)
 
-Key Features:
+🕸️ **Graph-RAG & Graph-Walking (since v1.7)** - Advanced retrieval combining vector seeds with recursive graph traversals using optimized Datalog algorithms
+
+🎯 **Multi-Vector Support (since v1.7)** - Dual embeddings per entity: content-embedding for context, name-embedding for identification
+
+⚡ **Semantic Caching (since v0.8.5)** - Two-level cache (L1 memory + L2 persistent) with semantic query matching
+
+⏱️ **Time-Travel Queries** - Version all changes via CozoDB Validity; query any point in history
+
+🔗 **Atomic Transactions (since v1.2)** - Multi-statement transactions ensuring data consistency
+
+📊 **Graph Algorithms (since v1.3/v1.6)** - PageRank, Betweenness Centrality, HITS, Community Detection, Shortest Path
+
+🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization
+
+👤 **User Preference Profiling** - Persistent user preferences with automatic 50% search boost
+
+🔍 **Near-Duplicate Detection** - Automatic LSH-based deduplication to avoid redundancy
+
+🧠 **Inference Engine** - Implicit knowledge discovery with multiple strategies
+
+🏠 **100% Local** - Embeddings via ONNX/Transformers; no external services required
+
+📦 **Export/Import (since v1.8)** - Export to JSON, Markdown, or Obsidian-ready ZIP; import from Mem0, MemGPT, Markdown, or native format
+
+### Detailed Features
 - **Hybrid Search (v0.7 Optimized)**: Combination of semantic search (HNSW), **Full-Text Search (FTS)**, and graph signals, merged via Reciprocal Rank Fusion (RRF).
 - **Full-Text Search (FTS)**: Native CozoDB v0.7 FTS indices with stemming, stopword filtering, and robust query sanitizing (cleaning of `+ - * / \ ( ) ? .`) for maximum stability.
 - **Near-Duplicate Detection (LSH)**: Automatically detects very similar observations via MinHash-LSH (CozoDB v0.7) to avoid redundancy.
@@ -119,32 +167,57 @@ This tool (`src/benchmark.ts`) performs the following tests:
 3.  **Search Performance**: Latency measurement for Hybrid Search vs. Raw Vector Search.
 4.  **RRF Overhead**: Determination of additional computation time for fusion logic.
 
-## Architecture (High Level)
+## Architecture
 
+```mermaid
+graph TB
+    Client[MCP Client<br/>Claude Desktop, etc.]
+    Server[MCP Server<br/>FastMCP + Zod Schemas]
+    Services[Memory Services]
+    Embeddings[Embeddings<br/>ONNX Runtime]
+    Search[Hybrid Search<br/>RRF Fusion]
+    Cache[Semantic Cache<br/>L1 + L2]
+    Inference[Inference Engine<br/>Multi-Strategy]
+    DB[(CozoDB SQLite<br/>Relations + Validity<br/>HNSW Indices<br/>Datalog/Graph)]
+    
+    Client -->|stdio| Server
+    Server --> Services
+    Services --> Embeddings
+    Services --> Search
+    Services --> Cache
+    Services --> Inference
+    Services --> DB
+    
+    style Client fill:#e1f5ff
+    style Server fill:#fff4e1
+    style Services fill:#f0e1ff
+    style DB fill:#e1ffe1
 ```
-┌───────────────────────────┐
-│         MCP Client         │
-└──────────────┬────────────┘
-               │ stdio
-┌──────────────▼────────────┐
-│        MCP Server          │
-│  FastMCP + Zod Schemas     │
-└──────────────┬────────────┘
-               │
-┌──────────────▼────────────┐
-│  Memory Services           │
-│  - Embeddings (ONNX)       │
-│  - Hybrid Search (RRF)     │
-│  - Semantic LRU Cache      │
-│  - Inference Engine        │
-└──────────────┬────────────┘
-               │
-┌──────────────▼────────────┐
-│       CozoDB (SQLite)      │
-│  - Relations + Validity    │
-│  - HNSW Indices            │
-│  - Datalog/Graph Algorithms│
-└───────────────────────────┘
+
+### Graph-Walking Visualization
+
+```mermaid
+graph LR
+    Start([Query: What is Alice working on?])
+    V1[Vector Search<br/>Find: Alice]
+    E1[Alice<br/>Person]
+    E2[Project X<br/>Project]
+    E3[Feature Flags<br/>Technology]
+    E4[Bob<br/>Person]
+    
+    Start --> V1
+    V1 -.semantic similarity.-> E1
+    E1 -->|works_on| E2
+    E2 -->|uses_tech| E3
+    E1 -->|colleague_of| E4
+    E4 -.semantic: also relevant.-> E2
+    
+    style Start fill:#e1f5ff
+    style V1 fill:#fff4e1
+    style E1 fill:#ffe1e1
+    style E2 fill:#e1ffe1
+    style E3 fill:#f0e1ff
+    style E4 fill:#ffe1e1
 ```
 
 ## Installation
@@ -277,6 +350,13 @@ CozoDB Relations (simplified) – all write operations create new `Validity` ent
 
 The interface is reduced to **4 consolidated tools**. The concrete operation is always chosen via `action`.
 
+| Tool | Purpose | Key Actions |
+|------|---------|-------------|
+| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file |
+| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking |
+| `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
+| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, clear_memory |
+
 ### mutate_memory (Write)
 
 Actions:
@@ -288,6 +368,7 @@ Actions:
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(New v1.2)**: Executes multiple operations atomically.
 - `add_inference_rule`: `{ name, datalog }`
 - `ingest_file`: `{ format, content, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+  - `chunking` options: `"none"`, `"paragraphs"` (future: `"semantic"`)
 
 Important Details:
 - `run_transaction` supports `create_entity`, `add_observation`, and `create_relation`. Parameters are automatically suffixed to avoid collisions.
@@ -447,7 +528,10 @@ Examples:
 ### manage_system (Maintenance)
 
 Actions:
-- `health`: `{}` returns DB counts + embedding cache stats.
+- `health`: `{}` returns DB counts + embedding cache stats + performance metrics.
+- `metrics`: `{}` returns detailed operation counts, error statistics, and performance data.
+- `export_memory`: `{ format, includeMetadata?, includeRelationships?, includeObservations?, entityTypes?, since? }` exports memory to various formats.
+- `import_memory`: `{ data, sourceFormat, mergeStrategy?, defaultEntityType? }` imports memory from external sources.
 - `snapshot_create`: `{ metadata? }`
 - `snapshot_list`: `{}`
 - `snapshot_diff`: `{ snapshot_id_a, snapshot_id_b }`
@@ -460,12 +544,119 @@ Janitor Cleanup Details:
 - With `confirm: true`, the Janitor becomes active:
   - **Hierarchical Summarization**: Detects isolated or old observations, has them summarized by a local LLM (Ollama), and creates a new `ExecutiveSummary` node. Old fragments are deleted to reduce noise while preserving knowledge.
 
+**Before Janitor:**
+```
+Entity: Project X
+├─ Observation 1: "Started in Q1" (90 days old, isolated)
+├─ Observation 2: "Uses React" (85 days old, isolated)
+├─ Observation 3: "Team of 5" (80 days old, isolated)
+└─ Observation 4: "Deployed to staging" (75 days old, isolated)
+```
+
+**After Janitor:**
+```
+Entity: Project X
+└─ ExecutiveSummary: "Project X is a React-based application started in Q1 
+   with a team of 5 developers, currently deployed to staging environment."
+```
+
 Reflection Service Details:
 - `reflect` analyzes observations of an entity (or top 5 active entities) to find contradictions, patterns, or temporal developments.
 - Results are persisted as new observations with metadata field `{ "kind": "reflection" }` and are retrievable via `context`.
 - Text is stored with prefix `Reflective Insight: `.
 
 Defaults: `older_than_days=30`, `max_observations=20`, `min_entity_degree=2`, `model="demyagent-4b-i1:Q6_K"`.
+
+Export/Import Details:
+- `export_memory` supports three formats:
+  - **JSON** (`format: "json"`): Native Cozo format, fully re-importable with all metadata and timestamps.
+  - **Markdown** (`format: "markdown"`): Human-readable document with entities, observations, and relationships.
+  - **Obsidian** (`format: "obsidian"`): ZIP archive with Wiki-Links `[[Entity]]`, YAML frontmatter, ready for Obsidian vault.
+- `import_memory` supports four source formats:
+  - **Cozo** (`sourceFormat: "cozo"`): Import from native JSON export.
+  - **Mem0** (`sourceFormat: "mem0"`): Import from Mem0 format (user_id becomes entity).
+  - **MemGPT** (`sourceFormat: "memgpt"`): Import from MemGPT archival/recall memory.
+  - **Markdown** (`sourceFormat: "markdown"`): Parse markdown sections as entities with observations.
+- Merge strategies: `skip` (default, skip duplicates), `overwrite` (replace existing), `merge` (combine metadata).
+- Optional filters: `entityTypes` (array), `since` (Unix timestamp in ms), `includeMetadata`, `includeRelationships`, `includeObservations`.
+
+Example Export:
+```json
+{
+  "action": "export_memory",
+  "format": "obsidian",
+  "includeMetadata": true,
+  "entityTypes": ["Person", "Project"]
+}
+```
+
+Example Import:
+```json
+{
+  "action": "import_memory",
+  "sourceFormat": "mem0",
+  "data": "{\"user_id\": \"alice\", \"memories\": [...]}",
+  "mergeStrategy": "skip"
+}
+```
+
+Production Monitoring Details:
+- `health` provides comprehensive system status including entity/observation/relationship counts, embedding cache statistics, and performance metrics (last operation time, average operation time, total operations).
+- `metrics` returns detailed operational metrics:
+  - **Operation Counts**: Tracks create_entity, update_entity, delete_entity, add_observation, create_relation, search, and graph_operations.
+  - **Error Statistics**: Total errors and breakdown by operation type.
+  - **Performance Metrics**: Last operation duration, average operation duration, and total operations executed.
+- Delete operations now include detailed logging with verification steps and return statistics about deleted data (observations, outgoing/incoming relations).
+
+## Production Monitoring
+
+The system includes comprehensive monitoring capabilities for production deployments:
+
+### Metrics Tracking
+
+All operations are automatically tracked with detailed metrics:
+- Operation counts by type (create, update, delete, search, etc.)
+- Error tracking with breakdown by operation
+- Performance metrics (latency, throughput)
+
+### Health Endpoint
+
+The `health` action provides real-time system status:
+```json
+{ "action": "health" }
+```
+
+Returns:
+- Database counts (entities, observations, relationships)
+- Embedding cache statistics (hit rate, size)
+- Performance metrics (last operation time, average time, total operations)
+
+### Metrics Endpoint
+
+The `metrics` action provides detailed operational metrics:
+```json
+{ "action": "metrics" }
+```
+
+Returns:
+- **operations**: Count of each operation type
+- **errors**: Total errors and breakdown by operation
+- **performance**: Last operation duration, average duration, total operations
+
+### Enhanced Delete Operations
+
+Delete operations include comprehensive logging and verification:
+- Detailed step-by-step logging with `[Delete]` prefix
+- Counts related data before deletion
+- Verification after deletion
+- Returns statistics: `{ deleted: { observations: N, outgoing_relations: N, incoming_relations: N } }`
+
+Example:
+```json
+{ "action": "delete_entity", "entity_id": "ENTITY_ID" }
+```
+
+Returns deletion statistics showing exactly what was removed.
 
 ## Technical Highlights
 
@@ -572,8 +763,26 @@ npx ts-node test-user-pref.ts
 
 ## Troubleshooting
 
-- Embedding model download may take a long time on first start (Transformers loads artifacts).
-- If `cleanup` is used, an Ollama service must be reachable locally and the desired model must be present.
+### Common Issues
+
+**First Start Takes Long**
+- The embedding model download takes 30-90 seconds on first start (Transformers loads ~500MB of artifacts)
+- This is normal and only happens once
+- Subsequent starts are fast (< 2 seconds)
+
+**Cleanup/Reflect Requires Ollama**
+- If using `cleanup` or `reflect` actions, an Ollama service must be running locally
+- Install Ollama from https://ollama.ai
+- Pull the desired model: `ollama pull demyagent-4b-i1:Q6_K` (or your preferred model)
+
+**Windows-Specific**
+- Embeddings are processed on CPU for maximum compatibility
+- RocksDB backend requires Visual C++ Redistributable if using that option
+
+**Performance Issues**
+- First query after restart is slower (cold cache)
+- Use `health` action to check cache hit rates
+- Consider RocksDB backend for datasets > 100k entities
 
 ## License
 

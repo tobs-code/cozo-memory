@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { EmbeddingService } from "./embedding-service";
-
+import { ExportImportService } from "./export-import-service";
 import { FastMCP } from "fastmcp";
 import { CozoDb } from "cozo-node";
 import { z } from "zod";
@@ -25,6 +25,52 @@ export class MemoryServer {
   public hybridSearch: HybridSearch;
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
+  
+  // Metrics tracking
+  private metrics = {
+    operations: {
+      create_entity: 0,
+      update_entity: 0,
+      delete_entity: 0,
+      add_observation: 0,
+      create_relation: 0,
+      search: 0,
+      graph_operations: 0
+    },
+    errors: {
+      total: 0,
+      by_operation: {} as Record<string, number>
+    },
+    performance: {
+      last_operation_ms: 0,
+      avg_operation_ms: 0,
+      total_operations: 0
+    }
+  };
+  
+  private trackOperation(operation: string, startTime: number) {
+    const duration = Date.now() - startTime;
+    this.metrics.performance.last_operation_ms = duration;
+    this.metrics.performance.total_operations++;
+    
+    // Calculate running average
+    const prevAvg = this.metrics.performance.avg_operation_ms;
+    const n = this.metrics.performance.total_operations;
+    this.metrics.performance.avg_operation_ms = (prevAvg * (n - 1) + duration) / n;
+    
+    // Track operation count
+    if (operation in this.metrics.operations) {
+      (this.metrics.operations as any)[operation]++;
+    }
+  }
+  
+  private trackError(operation: string) {
+    this.metrics.errors.total++;
+    if (!this.metrics.errors.by_operation[operation]) {
+      this.metrics.errors.by_operation[operation] = 0;
+    }
+    this.metrics.errors.by_operation[operation]++;
+  }
 
   constructor(dbPath: string = DB_PATH) {
     const fullDbPath = DB_ENGINE === "sqlite" ? dbPath + ".db" : dbPath;
@@ -1007,6 +1053,7 @@ export class MemoryServer {
   }
 
   public async createEntity(args: { name: string, type: string, metadata?: any }) {
+    const startTime = Date.now();
     try {
       if (!args.name || args.name.trim() === "") {
         return { error: "Entity name must not be empty" };
@@ -1034,8 +1081,11 @@ export class MemoryServer {
       }
 
       const id = uuidv4();
-      return this.createEntityWithId(id, args.name, args.type, args.metadata);
+      const result = await this.createEntityWithId(id, args.name, args.type, args.metadata);
+      this.trackOperation('create_entity', startTime);
+      return result;
     } catch (error: any) {
+      this.trackError('create_entity');
       console.error("Error in create_entity:", error);
       if (error.display) {
         console.error("CozoDB Error Details:", error.display);
@@ -1267,6 +1317,32 @@ export class MemoryServer {
     }
     if (toEntity.rows.length === 0) {
       return { error: `Target entity with ID '${args.to_id}' not found` };
+    }
+
+    // FIX: Check for duplicate relations
+    try {
+      const existingRel = await this.db.run(
+        '?[from_id, to_id, relation_type, strength, metadata] := *relationship{from_id, to_id, relation_type, strength, metadata, @ "NOW"}, from_id = $from, to_id = $to, relation_type = $type',
+        { from: args.from_id, to: args.to_id, type: args.relation_type }
+      );
+
+      if (existingRel.rows.length > 0) {
+        // Update existing relation instead of creating duplicate
+        const now = Date.now() * 1000;
+        await this.db.run(`
+          ?[from_id, to_id, relation_type, created_at, strength, metadata] <- [[$from_id, $to_id, $relation_type, [${now}, true], $strength, $metadata]] 
+          :put relationship {from_id, to_id, relation_type, created_at => strength, metadata}
+        `, {
+          from_id: args.from_id,
+          to_id: args.to_id,
+          relation_type: args.relation_type,
+          strength: args.strength ?? 1.0,
+          metadata: args.metadata || {}
+        });
+        return { status: "Relationship updated (was duplicate)" };
+      }
+    } catch (e) {
+      console.error('[Relation] Duplicate check failed, proceeding with insert:', e);
     }
 
     const now = Date.now() * 1000;
@@ -1910,24 +1986,61 @@ ids[id] <- $ids
   }
 
   public async deleteEntity(args: { entity_id: string }) {
+    const startTime = Date.now();
     try {
+      console.error(`[Delete] Starting deletion for entity: ${args.entity_id}`);
+      
       // 1. Check if entity exists
       const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.entity_id });
       if (entityRes.rows.length === 0) {
+        console.error(`[Delete] Entity not found: ${args.entity_id}`);
         return { error: `Entity with ID '${args.entity_id}' not found` };
       }
+      
+      console.error(`[Delete] Entity found: ${entityRes.rows[0][0]}`);
 
-      // 2. Delete all related data in a transaction (block)
+      // 2. Count related data before deletion
+      const obsCount = await this.db.run('?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $id', { id: args.entity_id });
+      const relOutCount = await this.db.run('?[count(from_id)] := *relationship{from_id, to_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
+      const relInCount = await this.db.run('?[count(to_id)] := *relationship{from_id, to_id, @ "NOW"}, to_id = $id', { id: args.entity_id });
+      
+      console.error(`[Delete] Related data: ${obsCount.rows[0][0]} observations, ${relOutCount.rows[0][0]} outgoing relations, ${relInCount.rows[0][0]} incoming relations`);
+
+      // 3. Delete all related data in a transaction (block)
+      console.error(`[Delete] Executing deletion transaction...`);
       await this.db.run(`
         { ?[id, created_at] := *observation{id, entity_id, created_at}, entity_id = $target_id :rm observation {id, created_at} }
         { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, from_id = $target_id :rm relationship {from_id, to_id, relation_type, created_at} }
         { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, to_id = $target_id :rm relationship {from_id, to_id, relation_type, created_at} }
         { ?[id, created_at] := *entity{id, created_at}, id = $target_id :rm entity {id, created_at} }
       `, { target_id: args.entity_id });
+      
+      // 4. Verify deletion
+      const verifyEntity = await this.db.run('?[id] := *entity{id, @ "NOW"}, id = $id', { id: args.entity_id });
+      const verifyObs = await this.db.run('?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $id', { id: args.entity_id });
+      const verifyRelOut = await this.db.run('?[count(from_id)] := *relationship{from_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
+      const verifyRelIn = await this.db.run('?[count(to_id)] := *relationship{to_id, @ "NOW"}, to_id = $id', { id: args.entity_id });
+      
+      console.error(`[Delete] Verification: entity exists=${verifyEntity.rows.length > 0}, observations=${verifyObs.rows[0][0]}, outgoing_relations=${verifyRelOut.rows[0][0]}, incoming_relations=${verifyRelIn.rows[0][0]}`);
+      
+      if (verifyEntity.rows.length > 0) {
+        console.error(`[Delete] WARNING: Entity still visible after deletion!`);
+      } else {
+        console.error(`[Delete] ✓ Entity successfully deleted`);
+      }
 
-      return { status: "Entity and all related data deleted" };
+      this.trackOperation('delete_entity', startTime);
+      return { 
+        status: "Entity and all related data deleted",
+        deleted: {
+          observations: obsCount.rows[0][0],
+          outgoing_relations: relOutCount.rows[0][0],
+          incoming_relations: relInCount.rows[0][0]
+        }
+      };
     } catch (error: any) {
-      console.error("Error during deletion:", error);
+      console.error("[Delete] Error during deletion:", error);
+      this.trackError('delete_entity');
       return { error: "Deletion failed", message: error.message };
     }
   }
@@ -2089,6 +2202,28 @@ ids[id] <- $ids
                 }
             }
 
+            // FIX: Validate that both entities exist before creating relation
+            try {
+              const [fromExists, toExists] = await Promise.all([
+                this.db.run('?[id, name] := *entity{id, name, @ "NOW"}, id = $id', { id: from_id }),
+                this.db.run('?[id, name] := *entity{id, name, @ "NOW"}, id = $id', { id: to_id })
+              ]);
+
+              if (fromExists.rows.length === 0) {
+                return { error: `Transaction failed: Source entity '${from_id}' not found in operation ${i}` };
+              }
+              if (toExists.rows.length === 0) {
+                return { error: `Transaction failed: Target entity '${to_id}' not found in operation ${i}` };
+              }
+            } catch (e: any) {
+              return { error: `Transaction failed: Entity validation error in operation ${i}: ${e.message}` };
+            }
+
+            // FIX: Check for self-reference
+            if (from_id === to_id) {
+              return { error: `Transaction failed: Self-references not allowed in operation ${i}` };
+            }
+
             const now = Date.now() * 1000;
 
             allParams[`rel_from${suffix}`] = from_id;
@@ -2237,6 +2372,36 @@ ids[id] <- $ids
   public async graphRag(args: Parameters<HybridSearch['graphRag']>[0]) {
     await this.initPromise;
     return this.hybridSearch.graphRag(args);
+  }
+
+  public async exportMemory(args: {
+    format: 'json' | 'markdown' | 'obsidian';
+    includeMetadata?: boolean;
+    includeRelationships?: boolean;
+    includeObservations?: boolean;
+    entityTypes?: string[];
+    since?: number;
+  }) {
+    await this.initPromise;
+    const dbService = { run: (query: string, params?: any) => this.db.run(query, params) };
+    const exportService = new ExportImportService(dbService as any);
+    return exportService.exportMemory(args);
+  }
+
+  public async importMemory(args: {
+    data: string | any;
+    sourceFormat: 'mem0' | 'memgpt' | 'markdown' | 'cozo';
+    mergeStrategy?: 'skip' | 'overwrite' | 'merge';
+    defaultEntityType?: string;
+  }) {
+    await this.initPromise;
+    const dbService = { run: (query: string, params?: any) => this.db.run(query, params) };
+    const exportService = new ExportImportService(dbService as any);
+    return exportService.importMemory(args.data, {
+      sourceFormat: args.sourceFormat,
+      mergeStrategy: args.mergeStrategy,
+      defaultEntityType: args.defaultEntityType
+    });
   }
 
   private registerTools() {
@@ -3213,6 +3378,23 @@ Supported actions:
 
     const ManageSystemSchema = z.discriminatedUnion("action", [
       z.object({ action: z.literal("health") }),
+      z.object({ action: z.literal("metrics") }),
+      z.object({
+        action: z.literal("export_memory"),
+        format: z.enum(["json", "markdown", "obsidian"]).describe("Export format"),
+        includeMetadata: z.boolean().optional().describe("Include metadata in export"),
+        includeRelationships: z.boolean().optional().describe("Include relationships in export"),
+        includeObservations: z.boolean().optional().describe("Include observations in export"),
+        entityTypes: z.array(z.string()).optional().describe("Filter by entity types"),
+        since: z.number().optional().describe("Unix timestamp (ms) - only export data created after this time"),
+      }),
+      z.object({
+        action: z.literal("import_memory"),
+        data: z.union([z.string(), z.any()]).describe("Import data (JSON string or object)"),
+        sourceFormat: z.enum(["mem0", "memgpt", "markdown", "cozo"]).describe("Source format"),
+        mergeStrategy: z.enum(["skip", "overwrite", "merge"]).optional().default("skip").describe("How to handle existing entities"),
+        defaultEntityType: z.string().optional().default("Note").describe("Default type for imported entities"),
+      }),
       z.object({
         action: z.literal("snapshot_create"),
         metadata: MetadataSchema.optional().describe("Additional metadata for the snapshot"),
@@ -3244,8 +3426,18 @@ Supported actions:
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory"])
+        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory"])
         .describe("Action (determines which fields are required)"),
+      format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
+      includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
+      includeRelationships: z.boolean().optional().describe("Include relationships (for export_memory)"),
+      includeObservations: z.boolean().optional().describe("Include observations (for export_memory)"),
+      entityTypes: z.array(z.string()).optional().describe("Filter by entity types (for export_memory)"),
+      since: z.number().optional().describe("Unix timestamp in ms (for export_memory)"),
+      data: z.union([z.string(), z.any()]).optional().describe("Import data (for import_memory)"),
+      sourceFormat: z.enum(["mem0", "memgpt", "markdown", "cozo"]).optional().describe("Source format (for import_memory)"),
+      mergeStrategy: z.enum(["skip", "overwrite", "merge"]).optional().describe("Merge strategy (for import_memory)"),
+      defaultEntityType: z.string().optional().describe("Default entity type (for import_memory)"),
       snapshot_id_a: z.string().optional().describe("Required for snapshot_diff"),
       snapshot_id_b: z.string().optional().describe("Required for snapshot_diff"),
       metadata: MetadataSchema.optional().describe("Optional for snapshot_create"),
@@ -3261,7 +3453,17 @@ Supported actions:
       name: "manage_system",
       description: `System maintenance and memory management. Select operation via 'action'.
 Supported actions:
-- 'health': Status check. Returns DB counts and embedding cache statistics.
+- 'health': Status check. Returns DB counts, embedding cache statistics, and performance metrics.
+- 'metrics': Detailed metrics. Returns operation counts, error statistics, and performance data.
+- 'export_memory': Export memory to various formats. Params: { format: 'json'|'markdown'|'obsidian', includeMetadata?: boolean, includeRelationships?: boolean, includeObservations?: boolean, entityTypes?: string[], since?: number }.
+  * format='json': Native Cozo format (re-importable)
+  * format='markdown': Human-readable markdown document
+  * format='obsidian': ZIP archive with wiki-links, ready for Obsidian vault
+- 'import_memory': Import memory from external sources. Params: { data: string|object, sourceFormat: 'mem0'|'memgpt'|'markdown'|'cozo', mergeStrategy?: 'skip'|'overwrite'|'merge', defaultEntityType?: string }.
+  * sourceFormat='mem0': Import from Mem0 format (user_id becomes entity)
+  * sourceFormat='memgpt': Import from MemGPT archival/recall memory
+  * sourceFormat='markdown': Parse markdown sections as entities
+  * sourceFormat='cozo': Import from native Cozo JSON export
 - 'snapshot_create': Creates a backup point. Params: { metadata?: object }.
 - 'snapshot_list': Lists all available snapshots.
 - 'snapshot_diff': Compares two snapshots. Params: { snapshot_id_a: string, snapshot_id_b: string }.
@@ -3292,11 +3494,76 @@ Supported actions:
                 observations: obsResult.rows.length,
                 relations: relResult.rows.length,
               },
-              performance: { embedding_cache: this.embeddingService.getCacheStats() },
+              performance: { 
+                embedding_cache: this.embeddingService.getCacheStats(),
+                last_operation_ms: this.metrics.performance.last_operation_ms,
+                avg_operation_ms: this.metrics.performance.avg_operation_ms,
+                total_operations: this.metrics.performance.total_operations
+              },
+              metrics: {
+                operations: this.metrics.operations,
+                errors: this.metrics.errors
+              },
               timestamp: new Date().toISOString(),
             });
           } catch (error: any) {
             return JSON.stringify({ status: "error", error: error.message, timestamp: new Date().toISOString() });
+          }
+        }
+        
+        if (input.action === "metrics") {
+          try {
+            return JSON.stringify({
+              operations: this.metrics.operations,
+              errors: this.metrics.errors,
+              performance: this.metrics.performance,
+              embedding_cache: this.embeddingService.getCacheStats(),
+              timestamp: new Date().toISOString()
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: "Failed to retrieve metrics", message: error.message });
+          }
+        }
+
+        if (input.action === "export_memory") {
+          try {
+            const result = await this.exportMemory({
+              format: input.format,
+              includeMetadata: input.includeMetadata,
+              includeRelationships: input.includeRelationships,
+              includeObservations: input.includeObservations,
+              entityTypes: input.entityTypes,
+              since: input.since
+            });
+            
+            if (result.format === 'obsidian' && result.zipBuffer) {
+              // For Obsidian ZIP, return base64 encoded buffer
+              return JSON.stringify({
+                format: 'obsidian',
+                data: result.zipBuffer.toString('base64'),
+                stats: result.stats,
+                encoding: 'base64',
+                filename: `memory_export_${Date.now()}.zip`
+              });
+            }
+            
+            return JSON.stringify(result);
+          } catch (error: any) {
+            return JSON.stringify({ error: "Export failed", message: error.message });
+          }
+        }
+
+        if (input.action === "import_memory") {
+          try {
+            const result = await this.importMemory({
+              data: input.data,
+              sourceFormat: input.sourceFormat,
+              mergeStrategy: input.mergeStrategy,
+              defaultEntityType: input.defaultEntityType
+            });
+            return JSON.stringify(result);
+          } catch (error: any) {
+            return JSON.stringify({ error: "Import failed", message: error.message });
           }
         }
 
