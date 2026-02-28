@@ -28,6 +28,7 @@
 - [Development](#development)
 - [User Preference Profiling](#user-preference-profiling-mem0-style)
 - [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -225,7 +226,11 @@ graph LR
 
 ### Prerequisites
 - Node.js 20+ (recommended)
-- CozoDB native dependency is installed via `cozo-node`.
+- **RAM: 1.7 GB minimum** (for default bge-m3 model)
+  - Model download: ~600 MB
+  - Runtime memory: ~1.1 GB
+  - For lower-spec machines, see [Embedding Model Options](#embedding-model-options) below
+- CozoDB native dependency is installed via `cozo-node`
 
 ### Via npm (Easiest)
 
@@ -257,6 +262,38 @@ npm run start
 Notes:
 - On first start, `@xenova/transformers` downloads the embedding model (may take time).
 - Embeddings are processed on the CPU.
+
+### Embedding Model Options
+
+CozoDB Memory supports multiple embedding models via the `EMBEDDING_MODEL` environment variable:
+
+| Model | Size | RAM | Dimensions | Best For |
+|-------|------|-----|------------|----------|
+| `Xenova/bge-m3` (default) | ~600 MB | ~1.7 GB | 1024 | High accuracy, production use |
+| `Xenova/all-MiniLM-L6-v2` | ~80 MB | ~400 MB | 384 | Low-spec machines, development |
+| `Xenova/bge-small-en-v1.5` | ~130 MB | ~600 MB | 384 | Balanced performance |
+
+**Usage:**
+
+```bash
+# Use lightweight model for development
+EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run start
+
+# Or set in Claude Desktop config
+{
+  "mcpServers": {
+    "cozo-memory": {
+      "command": "npx",
+      "args": ["cozo-memory"],
+      "env": {
+        "EMBEDDING_MODEL": "Xenova/all-MiniLM-L6-v2"
+      }
+    }
+  }
+}
+```
+
+**Note:** Changing models requires re-embedding existing data. The model is downloaded once on first use.
 
 ## Start / Integration
 
@@ -335,6 +372,14 @@ DB_ENGINE=rocksdb npm run dev
 | **SQLite** | Active (Default) | Standard for desktop/local usage. |
 | **RocksDB** | Prepared & Tested | For high-performance or very large datasets. |
 | **MDBX** | Not supported | Requires manual build of `cozo-node` from source. |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_ENGINE` | `sqlite` | Database backend: `sqlite` or `rocksdb` |
+| `EMBEDDING_MODEL` | `Xenova/bge-m3` | Embedding model (see [Embedding Model Options](#embedding-model-options)) |
+| `PORT` | `3001` | HTTP API bridge port (if using `npm run bridge`) |
 
 ---
 
@@ -784,6 +829,36 @@ npx ts-node test-user-pref.ts
 - First query after restart is slower (cold cache)
 - Use `health` action to check cache hit rates
 - Consider RocksDB backend for datasets > 100k entities
+
+## Roadmap
+
+CozoDB Memory is actively developed. Here's what's planned:
+
+### Near-Term (v1.x)
+
+- **GPU Acceleration** - CUDA support for embedding generation (10-50x faster)
+- **Streaming Ingestion** - Real-time data ingestion from logs, APIs, webhooks
+- **Advanced Chunking** - Semantic chunking for `ingest_file` (paragraph-aware splitting)
+- **Query Optimization** - Automatic query plan optimization for complex graph traversals
+- **Additional Export Formats** - Notion, Roam Research, Logseq compatibility
+
+### Mid-Term (v2.x)
+
+- **Multi-Modal Embeddings** - Image and audio embedding support via CLIP/Whisper
+- **Distributed Mode** - Multi-node deployment with CozoDB clustering
+- **Real-Time Sync** - WebSocket-based live updates for collaborative use cases
+- **Advanced Inference** - Causal reasoning, temporal pattern detection
+- **Web UI** - Optional web interface for memory exploration and visualization
+
+### Long-Term
+
+- **Federated Learning** - Privacy-preserving model updates across instances
+- **Custom Embedding Models** - Fine-tune embeddings on domain-specific data
+- **Plugin System** - Extensible architecture for custom tools and integrations
+
+### Community Requests
+
+Have a feature idea? Open an issue with the `enhancement` label or check [Low-Hanging-Fruit.md](Low-Hanging-Fruit.md) for quick wins you can contribute.
 
 ## Contributing
 

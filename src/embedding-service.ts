@@ -66,12 +66,26 @@ export class EmbeddingService {
   private cache: LRUCache<number[]>;
   private session: any | null = null;
   private tokenizer: any = null;
-  private readonly modelId: string = "Xenova/bge-m3";
-  private readonly dimensions: number = 1024;
+  private readonly modelId: string;
+  private readonly dimensions: number;
   private queue: Promise<any> = Promise.resolve();
 
   constructor() {
     this.cache = new LRUCache<number[]>(1000, 3600000); // 1000 entries, 1h TTL
+    
+    // Support multiple embedding models via environment variable
+    this.modelId = process.env.EMBEDDING_MODEL || "Xenova/bge-m3";
+    
+    // Set dimensions based on model
+    const dimensionMap: Record<string, number> = {
+      "Xenova/bge-m3": 1024,
+      "Xenova/all-MiniLM-L6-v2": 384,
+      "Xenova/bge-small-en-v1.5": 384,
+    };
+    
+    this.dimensions = dimensionMap[this.modelId] || 1024;
+    
+    console.log(`[EmbeddingService] Using model: ${this.modelId} (${this.dimensions} dimensions)`);
   }
 
   // Serializes embedding execution to avoid event loop blocking
@@ -93,7 +107,8 @@ export class EmbeddingService {
       }
 
       // 2. Determine model path
-      const baseDir = path.join(env.cacheDir, 'Xenova', 'bge-m3', 'onnx');
+      const modelName = this.modelId.split('/')[1]; // Extract model name from "Xenova/model-name"
+      const baseDir = path.join(env.cacheDir, 'Xenova', modelName, 'onnx');
       
       // Priority: FP32 (model.onnx) > Quantized (model_quantized.onnx)
       let modelPath = path.join(baseDir, 'model.onnx');
