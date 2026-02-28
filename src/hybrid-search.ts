@@ -1,84 +1,84 @@
- import { CozoDb } from "cozo-node";
- import { EmbeddingService } from "./embedding-service";
- import crypto from "crypto";
- 
- export interface SearchResult {
-   id: string;
-   entity_id?: string;
-   name?: string;
-   type?: string;
-   text?: string;
-   score: number;
-   metadata?: any;
-   created_at?: number;
-   updated_at?: number;
-   source: "vector" | "keyword" | "graph" | "community" | "inference" | "advanced_hybrid";
-   explanation?: {
+import { CozoDb } from "cozo-node";
+import { EmbeddingService } from "./embedding-service";
+import crypto from "crypto";
+
+export interface SearchResult {
+  id: string;
+  entity_id?: string;
+  name?: string;
+  type?: string;
+  text?: string;
+  score: number;
+  metadata?: any;
+  created_at?: number;
+  updated_at?: number;
+  source: "vector" | "keyword" | "graph" | "community" | "inference" | "advanced_hybrid";
+  explanation?: {
     source_score: number;
     details: string;
   } | string;
 }
 
 export interface HybridSearchOptions {
-   query: string;
-   limit?: number;
-   entityTypes?: string[];
-   includeObservations?: boolean;
-   includeEntities?: boolean;
-   vectorWeight?: number;
-   graphWeight?: number;
-   keywordWeight?: number;
-   inferenceWeight?: number;
-   timeRangeHours?: number;
- }
- 
- export interface AdvancedHybridQueryOptions extends HybridSearchOptions {
-   filters?: {
-     entityTypes?: string[];
-     minScore?: number;
-     metadata?: Record<string, any>;
-   };
-   graphConstraints?: {
-     maxDepth?: number;
-     requiredRelations?: string[];
-     targetEntityIds?: string[];
-   };
-   vectorParams?: {
-     efSearch?: number;
-     radius?: number;
-   };
- }
- 
- const SEMANTIC_CACHE_THRESHOLD = 0.95;
- 
- export class HybridSearch {
-   private db: CozoDb;
-   private embeddingService: EmbeddingService;
-   private searchCache = new Map<string, { results: SearchResult[]; timestamp: number }>();
-   private readonly CACHE_TTL = 300000; // 5 minutes cache
- 
-   constructor(db: CozoDb, embeddingService: EmbeddingService) {
-     this.db = db;
-     this.embeddingService = embeddingService;
-   }
- 
-   private getCacheKey(options: HybridSearchOptions): string {
-     const str = JSON.stringify({
-       q: options.query,
-       l: options.limit,
-       t: options.entityTypes,
-       io: options.includeObservations,
-       ie: options.includeEntities,
-       tr: options.timeRangeHours,
-       f: (options as AdvancedHybridQueryOptions).filters,
-       g: (options as AdvancedHybridQueryOptions).graphConstraints,
-       v: (options as AdvancedHybridQueryOptions).vectorParams
-     });
-     return crypto.createHash('md5').update(str).digest('hex');
-   }
- 
-   private async tryCacheLookup(options: HybridSearchOptions, queryEmbedding: number[]): Promise<SearchResult[] | null> {
-     const cacheKey = this.getCacheKey(options);
+  query: string;
+  limit?: number;
+  entityTypes?: string[];
+  includeObservations?: boolean;
+  includeEntities?: boolean;
+  vectorWeight?: number;
+  graphWeight?: number;
+  keywordWeight?: number;
+  inferenceWeight?: number;
+  timeRangeHours?: number;
+}
+
+export interface AdvancedHybridQueryOptions extends HybridSearchOptions {
+  filters?: {
+    entityTypes?: string[];
+    minScore?: number;
+    metadata?: Record<string, any>;
+  };
+  graphConstraints?: {
+    maxDepth?: number;
+    requiredRelations?: string[];
+    targetEntityIds?: string[];
+  };
+  vectorParams?: {
+    efSearch?: number;
+    radius?: number;
+  };
+}
+
+const SEMANTIC_CACHE_THRESHOLD = 0.95;
+
+export class HybridSearch {
+  private db: CozoDb;
+  private embeddingService: EmbeddingService;
+  private searchCache = new Map<string, { results: SearchResult[]; timestamp: number }>();
+  private readonly CACHE_TTL = 300000; // 5 minutes cache
+
+  constructor(db: CozoDb, embeddingService: EmbeddingService) {
+    this.db = db;
+    this.embeddingService = embeddingService;
+  }
+
+  private getCacheKey(options: HybridSearchOptions): string {
+    const str = JSON.stringify({
+      q: options.query,
+      l: options.limit,
+      t: options.entityTypes,
+      io: options.includeObservations,
+      ie: options.includeEntities,
+      tr: options.timeRangeHours,
+      f: (options as AdvancedHybridQueryOptions).filters,
+      g: (options as AdvancedHybridQueryOptions).graphConstraints,
+      v: (options as AdvancedHybridQueryOptions).vectorParams
+    });
+    return crypto.createHash('md5').update(str).digest('hex');
+  }
+
+  private async tryCacheLookup(options: HybridSearchOptions, queryEmbedding: number[]): Promise<SearchResult[] | null> {
+    const cacheKey = this.getCacheKey(options);
     const cached = this.searchCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < this.CACHE_TTL)) {
       console.error(`[HybridSearch] In-Memory cache hit for key: ${cacheKey}`);
@@ -101,20 +101,20 @@ export interface HybridSearchOptions {
     }
 
     return null;
-   }
- 
-   private async updateCache(options: HybridSearchOptions, queryEmbedding: number[], results: SearchResult[]) {
-     const cacheKey = this.getCacheKey(options);
-     this.searchCache.set(cacheKey, { results, timestamp: Date.now() });
-     try {
-       await this.db.run(
-         '?[query_hash, results, options, created_at, embedding] <- [[$hash, $res, $opt, $now, vec($emb)]] :put search_cache{query_hash}',
-         { hash: cacheKey, res: results, opt: options, now: Math.floor(Date.now() / 1000), emb: queryEmbedding }
-       );
-     } catch (e) {}
-   }
- 
-   private applyTimeDecay(results: SearchResult[]): SearchResult[] {
+  }
+
+  private async updateCache(options: HybridSearchOptions, queryEmbedding: number[], results: SearchResult[]) {
+    const cacheKey = this.getCacheKey(options);
+    this.searchCache.set(cacheKey, { results, timestamp: Date.now() });
+    try {
+      await this.db.run(
+        '?[query_hash, results, options, created_at, embedding] <- [[$hash, $res, $opt, $now, vec($emb)]] :put search_cache{query_hash}',
+        { hash: cacheKey, res: results, opt: options, now: Math.floor(Date.now() / 1000), emb: queryEmbedding }
+      );
+    } catch (e) { }
+  }
+
+  private applyTimeDecay(results: SearchResult[]): SearchResult[] {
     return results.map(r => {
       let score = Number(r.score);
       if (isNaN(score)) score = 0;
@@ -123,20 +123,20 @@ export interface HybridSearchOptions {
         const createdAt = Array.isArray(r.created_at) ? r.created_at[0] : r.created_at;
         const ageHours = (Date.now() - Number(createdAt) / 1000) / (1000 * 60 * 60);
         const decay = Math.pow(0.5, ageHours / (24 * 90)); // 90 days half-life
-        
+
         let newScore = score * decay;
         if (isNaN(newScore)) newScore = 0;
-        
+
         return { ...r, score: newScore };
       }
       return { ...r, score };
     });
   }
- 
-   async advancedSearch(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
+
+  async advancedSearch(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
     console.error("[HybridSearch] Starting advancedSearch with options:", JSON.stringify(options, null, 2));
     const { query, limit = 10, filters, graphConstraints, vectorParams } = options;
-    
+
     let queryEmbedding: number[];
     try {
       queryEmbedding = await this.embeddingService.embed(query);
@@ -153,9 +153,9 @@ export interface HybridSearchOptions {
     console.error("[HybridSearch] Cache miss, executing Datalog query...");
 
     let topk = limit * 2;
-    const hasFilters = (filters?.metadata && Object.keys(filters.metadata).length > 0) || 
-                       (filters?.entityTypes && filters.entityTypes.length > 0);
-                       
+    const hasFilters = (filters?.metadata && Object.keys(filters.metadata).length > 0) ||
+      (filters?.entityTypes && filters.entityTypes.length > 0);
+
     if (hasFilters) {
       // Significantly increase topk for post-filtering
       topk = Math.max(limit * 20, 200);
@@ -200,7 +200,7 @@ export interface HybridSearchOptions {
     // Multi-Vector Support: Use name_embedding if query is short (v1.7)
     let indexToSearch = indexToUse;
     const isShortQuery = query.split(' ').length <= 3;
-    
+
     if (isShortQuery && !filters?.entityTypes) {
       // For short queries without type filter, the name_semantic index is often more precise
       indexToSearch = "entity:name_semantic";
@@ -221,8 +221,8 @@ export interface HybridSearchOptions {
       const minTs = Date.now() - (options.timeRangeHours * 3600 * 1000);
       params.min_ts = minTs;
     }
- 
-     if (graphConstraints?.requiredRelations && graphConstraints.requiredRelations.length > 0) {
+
+    if (graphConstraints?.requiredRelations && graphConstraints.requiredRelations.length > 0) {
       graphConstraints.requiredRelations.forEach((relType, index) => {
         const relParam = `rel_type_${index}`;
         params[relParam] = relType;
@@ -288,8 +288,8 @@ export interface HybridSearchOptions {
         const minTs = Date.now() - (options.timeRangeHours * 3600 * 1000);
         searchResults = searchResults.filter(r => (r.created_at || 0) > minTs);
       }
- 
-       // Post-Filtering for Metadata (since CozoDB get() in Datalog often fails)
+
+      // Post-Filtering for Metadata (since CozoDB get() in Datalog often fails)
       if (filters?.metadata) {
         searchResults = searchResults.filter(r => {
           if (!r.metadata || typeof r.metadata !== 'object') return false;
@@ -298,40 +298,40 @@ export interface HybridSearchOptions {
       }
 
       const finalResults = this.applyTimeDecay(searchResults);
-       await this.updateCache(options, queryEmbedding, finalResults);
-       return finalResults;
-     } catch (e: any) {
-       console.error("[HybridSearch] Error in advancedSearch:", e.message);
-       return this.search(options);
-     }
-   }
- 
-   async search(options: HybridSearchOptions): Promise<SearchResult[]> {
-     const { query, limit = 10 } = options;
-     const queryEmbedding = await this.embeddingService.embed(query);
-     const cachedResults = await this.tryCacheLookup(options, queryEmbedding);
+      await this.updateCache(options, queryEmbedding, finalResults);
+      return finalResults;
+    } catch (e: any) {
+      console.error("[HybridSearch] Error in advancedSearch:", e.message);
+      return this.search(options);
+    }
+  }
+
+  async search(options: HybridSearchOptions): Promise<SearchResult[]> {
+    const { query, limit = 10 } = options;
+    const queryEmbedding = await this.embeddingService.embed(query);
+    const cachedResults = await this.tryCacheLookup(options, queryEmbedding);
     if (cachedResults) {
       // Add debug info to cached results too
       return cachedResults.map(r => ({
-          ...r,
-          explanation: (typeof r.explanation === 'string' ? r.explanation : JSON.stringify(r.explanation)) + ` | CACHED`
+        ...r,
+        explanation: (typeof r.explanation === 'string' ? r.explanation : JSON.stringify(r.explanation)) + ` | CACHED`
       }));
     }
 
     const { limit: queryLimit = 10, filters, graphConstraints, vectorParams } = options as AdvancedHybridQueryOptions;
     // @ts-ignore
     const { topk = 5, efSearch = 50 } = vectorParams || {};
- 
-     // Use advancedSearch as the default implementation
-     return this.advancedSearch({
-       ...options,
-       vectorParams: {
-         efSearch: 100
-       }
-     });
-   }
- 
-   async graphRag(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
+
+    // Use advancedSearch as the default implementation
+    return this.advancedSearch({
+      ...options,
+      vectorParams: {
+        efSearch: 100
+      }
+    });
+  }
+
+  async graphRag(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
     console.error("[HybridSearch] Starting graphRag with options:", JSON.stringify(options, null, 2));
     const { query, limit = 5, filters, graphConstraints } = options;
     const maxDepth = graphConstraints?.maxDepth || 2;
@@ -374,7 +374,7 @@ export interface HybridSearchOptions {
       params.min_ts = minTs;
     }
 
-     // Datalog Query for Graph-RAG:
+    // Datalog Query for Graph-RAG:
     // 1. Find seed entities via vector search (with inline filtering)
     // 2. Explore the graph starting from seeds up to maxDepth hops
     // 3. Collect all reached entities and observations
@@ -437,4 +437,112 @@ export interface HybridSearchOptions {
       return this.search(options);
     }
   }
- }
+
+  async agenticRetrieve(options: AdvancedHybridQueryOptions & { routingModel?: string }): Promise<SearchResult[]> {
+    console.error("[HybridSearch] Starting agenticRetrieve with query:", options.query);
+    const { query, routingModel = "demyagent-4b-i1:Q6_K" } = options;
+
+    const systemPrompt = `You are a Routing Agent for an advanced Memory/RAG system.
+Your job is to analyze the user's query and decide which search strategy is the most appropriate.
+Available strategies:
+- "vector_search": Best for finding specific facts or general semantic queries (e.g., "What ORM is used?", "How does feature X work?", "Welches System nutzt B?").
+- "graph_walk": Best for queries about relations, links, or paths between entities (e.g., "Who works with Bob?", "What depends on Project A?", "Wer arbeitet mit ReactJS?").
+- "community_summary": Best for high-level, overarching questions about the big picture, status, or general themes of entire clusters (e.g., "What is the general tech stack?", "Give me an overview of the legacy project", "Wie ist der generelle Status aller Frontend-Projekte?").
+- "hybrid": Best for complex queries that require both factual retrieval and deep relational context.
+
+You MUST respond with a JSON object in this format: {"strategy": "one_of_the_above"}.
+No markdown, no explanation. Just the JSON.`;
+
+    let strategy = "vector_search"; // Fallback
+
+    try {
+      const ollamaMod: any = await import("ollama");
+      const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+      const response = await ollamaClient.chat({
+        model: routingModel,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: query },
+        ],
+        format: "json",
+      });
+
+      let responseText = (response as any)?.message?.content?.trim?.() ?? "";
+
+      // Clean markdown formatting if Ollama returned it
+      if (responseText.startsWith("```json")) {
+        responseText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+      } else if (responseText.startsWith("```")) {
+        responseText = responseText.replace(/```/g, "").trim();
+      }
+
+      console.error(`[AgenticRetrieve] DEBUG: Raw LLM Output: ${responseText}`);
+
+      try {
+        const parsed = JSON.parse(responseText);
+        let selected = "";
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          selected = parsed[0];
+        } else if (typeof parsed === "object" && parsed.strategy) {
+          selected = parsed.strategy;
+        } else if (typeof parsed === "string") {
+          selected = parsed;
+        }
+
+        if (selected) {
+          const s = selected.toLowerCase();
+          if (["vector_search", "graph_walk", "community_summary", "hybrid"].includes(s)) {
+            strategy = s;
+          }
+        }
+      } catch (e) {
+        console.warn(`[AgenticRetrieve] Failed to parse JSON from LLM: ${responseText}`);
+      }
+    } catch (e: any) {
+      console.warn(`[AgenticRetrieve] Ollama routing failed: ${e.message}. Using fallback.`);
+    }
+
+    console.error(`[AgenticRetrieve] Selected Strategy: ${strategy}`);
+
+    let results: SearchResult[] = [];
+
+    // Map strategy to existing search methods
+    switch (strategy) {
+      case "graph_walk":
+      case "hybrid":
+        // Use our advanced Datalog graph-rag for deep relational context
+        results = await this.graphRag(options);
+        break;
+      case "community_summary":
+        // Prioritize CommunitySummary entities
+        results = await this.advancedSearch({
+          ...options,
+          filters: {
+            ...options.filters,
+            entityTypes: ["CommunitySummary"]
+          }
+        });
+
+        // If no community summaries found, fallback to standard search
+        if (results.length === 0) {
+          console.error(`[AgenticRetrieve] No Community Summaries found, falling back to hybrid search.`);
+          results = await this.advancedSearch(options);
+        }
+        break;
+      case "vector_search":
+      default:
+        // Standard vector search (which is advancedSearch in v1.7)
+        results = await this.advancedSearch(options);
+        break;
+    }
+
+    // Annotate results with the routing decision for testing/transparency
+    return results.map(r => ({
+      ...r,
+      metadata: {
+        ...(r.metadata || {}),
+        agentic_routing: strategy
+      }
+    }));
+  }
+}

@@ -59,7 +59,9 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🔍 **Hybrid Search (since v0.7)** - Combines semantic search (HNSW), full-text search (FTS), and graph signals via Reciprocal Rank Fusion (RRF)
 
-🕸️ **Graph-RAG & Graph-Walking (since v1.7)** - Advanced retrieval combining vector seeds with recursive graph traversals using optimized Datalog algorithms
+🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchical retrieval with community detection and summarization; recursive traversals using optimized Datalog algorithms
+
+🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
 
 🎯 **Multi-Vector Support (since v1.7)** - Dual embeddings per entity: content-embedding for context, name-embedding for identification
 
@@ -71,7 +73,9 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 📊 **Graph Algorithms (since v1.3/v1.6)** - PageRank, Betweenness Centrality, HITS, Community Detection, Shortest Path
 
-🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization
+🏗️ **Hierarchical GraphRAG (v2.0)** - Automatic generation of thematic "Community Summaries" using local LLMs to enable global "Big Picture" reasoning
+
+🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization and observation pruning
 
 👤 **User Preference Profiling** - Persistent user preferences with automatic 50% search boost
 
@@ -136,13 +140,14 @@ This server fills the gap in between ("Sweet Spot"): A **local, database-backed 
 | Feature | **CozoDB Memory (This Project)** | **Official Reference (`@modelcontextprotocol/server-memory`)** | **mcp-memory-service (Community)** | **Database Adapters (Qdrant/Neo4j)** |
 | :--- | :--- | :--- | :--- | :--- |
 | **Backend** | **CozoDB** (Graph + Vector + Relational) | JSON file (`memory.jsonl`) | SQLite / Cloudflare | Specialized DB (only Vector or Graph) |
-| **Search Logic** | **Hybrid (RRF)**: Vector + Keyword + Graph | Keyword only / Exact Graph Match | Vector + Keyword | Mostly only one dimension |
+| **Search Logic** | **Agentic (Auto-Route)**: Hybrid + Graph + Summaries | Keyword only / Exact Graph Match | Vector + Keyword | Mostly only one dimension |
 | **Inference** | **Yes**: Built-in engine for implicit knowledge | No | No ("Dreaming" is consolidation) | No (Retrieval only) |
+| **Community** | **Yes**: Hierarchical Community Summaries | No | No | Only clustering (no summary) |
 | **Time-Travel** | **Yes**: Queries at any point in time (`Validity`) | No (current state only) | History available, no native DB feature | No |
 | **Maintenance** | **Janitor**: LLM-backed cleanup | Manual | Automatic consolidation | Mostly manual |
 | **Deployment** | **Local** (Node.js + Embedded DB) | Local (Docker/NPX) | Local or Cloud | Often requires external DB server |
 
-The core advantage is **Retrieval Quality and Traceability**: By combining graph algorithms (PageRank, Community Detection) and vector indices (HNSW), context can be provided much more precisely than through pure similarity search.
+The core advantage is **Intelligence and Traceability**: By combining an **Agentic Retrieval Layer** with **Hierarchical GraphRAG**, the system can answer both specific factual questions and broad thematic queries with much higher accuracy than pure vector stores.
 
 ## Performance & Benchmarks
 
@@ -172,6 +177,22 @@ This tool (`src/benchmark.ts`) performs the following tests:
 2.  **Ingestion**: Mass import of test entities and observations (throughput).
 3.  **Search Performance**: Latency measurement for Hybrid Search vs. Raw Vector Search.
 4.  **RRF Overhead**: Determination of additional computation time for fusion logic.
+
+### Running Evaluation Suite (RAG Quality)
+
+To evaluate the quality and recall of different retrieval strategies (Search vs. Graph-RAG vs. Graph-Walking), use the evaluation suite:
+
+```bash
+npm run eval
+ ```
+ 
+This tool compares strategies using a synthetic dataset and measures **Recall@K**, **MRR**, and **Latency**.
+
+| Method | Recall@10 | Avg Latency | Best For |
+| :--- | :--- | :--- | :--- |
+| **Graph-RAG** | **1.00** | **~32 ms** | Deep relational reasoning |
+| **Graph-Walking** | 1.00 | ~50 ms | Associative path exploration |
+| **Hybrid Search** | 1.00 | ~89 ms | Broad factual retrieval |
 
 ## Architecture
 
@@ -488,9 +509,9 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file |
-| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking |
+| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
-| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, clear_memory |
+| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
 
 ### mutate_memory (Write)
 
@@ -594,6 +615,7 @@ Actions:
 - `history`: `{ entity_id }`
 - `graph_rag`: `{ query, max_depth?, limit?, filters? }` Graph-based reasoning. Finds vector seeds (with inline filtering) first and then expands transitive relationships. Uses recursive Datalog for efficient BFS expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Recursive semantic graph search. Starts at vector seeds or a specific entity and follows relationships to other semantically relevant entities. Ideal for deeper path exploration.
+- `agentic_search`: `{ query, limit? }` **(New v2.0)**: **Auto-Routing Search**. Uses a local LLM (Ollama) to analyze query intent and automatically routes it to the most appropriate strategy (`vector_search`, `graph_walk`, or `community_summary`).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Shows temporal development of relationships including time range filter and diff summary.
 
 Important Details:
@@ -687,7 +709,8 @@ Actions:
 - `snapshot_list`: `{}`
 - `snapshot_diff`: `{ snapshot_id_a, snapshot_id_b }`
 - `cleanup`: `{ confirm, older_than_days?, max_observations?, min_entity_degree?, model? }`
-- `reflect`: `{ entity_id?, model? }` Analyzes memory for contradictions and new insights.
+- `summarize_communities`: `{ model?, min_community_size? }` **(New v2.0)**: Triggers the **Hierarchical GraphRAG** pipeline. Recomputes communities, generates thematic summaries via LLM, and stores them as `CommunitySummary` entities.
+- `reflect`: `{ entity_id?, mode?, model? }` Analyzes memory for contradictions and new insights. Supports `summary` (default) and `discovery` (autonomous link refinement) modes.
 - `clear_memory`: `{ confirm }`
 
 Janitor Cleanup Details:
@@ -711,9 +734,14 @@ Entity: Project X
    with a team of 5 developers, currently deployed to staging environment."
 ```
 
-Reflection Service Details:
-- `reflect` analyzes observations of an entity (or top 5 active entities) to find contradictions, patterns, or temporal developments.
-- Results are persisted as new observations with metadata field `{ "kind": "reflection" }` and are retrievable via `context`.
+### Self-Improving Memory Loop (`reflect`)
+The `reflect` service analyzes observations of an entity (or top 5 active entities) to find contradictions, patterns, or temporal developments.
+- **Modes**:
+  - `summary` (default): Generates a textual "Reflective Insight" observation.
+  - `discovery`: Autonomously finds potential relationships using the Inference Engine and validates them via LLM. 
+    - High-confidence links (>0.8) are created automatically.
+    - Medium-confidence links (>0.5) are returned as suggestions.
+- Results are persisted as new observations (for `summary`) or relationships (for `discovery`) with metadata field `{ "kind": "reflection" }` or `{ "source": "reflection" }`.
 - Text is stored with prefix `Reflective Insight: `.
 
 Defaults: `older_than_days=30`, `max_observations=20`, `min_entity_degree=2`, `model="demyagent-4b-i1:Q6_K"`.

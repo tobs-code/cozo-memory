@@ -25,7 +25,7 @@ export class MemoryServer {
   public hybridSearch: HybridSearch;
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
-  
+
   // Metrics tracking
   private metrics = {
     operations: {
@@ -47,23 +47,23 @@ export class MemoryServer {
       total_operations: 0
     }
   };
-  
+
   private trackOperation(operation: string, startTime: number) {
     const duration = Date.now() - startTime;
     this.metrics.performance.last_operation_ms = duration;
     this.metrics.performance.total_operations++;
-    
+
     // Calculate running average
     const prevAvg = this.metrics.performance.avg_operation_ms;
     const n = this.metrics.performance.total_operations;
     this.metrics.performance.avg_operation_ms = (prevAvg * (n - 1) + duration) / n;
-    
+
     // Track operation count
     if (operation in this.metrics.operations) {
       (this.metrics.operations as any)[operation]++;
     }
   }
-  
+
   private trackError(operation: string) {
     this.metrics.errors.total++;
     if (!this.metrics.errors.by_operation[operation]) {
@@ -160,17 +160,17 @@ export class MemoryServer {
     // Always perform cache cleanup, regardless of observation candidates
     const cutoff = Math.floor((Date.now() - olderThanDays * 24 * 3600 * 1000) / 1000);
     console.error(`[Janitor] Cleaning cache (older than ${new Date(cutoff * 1000).toISOString()}, ts=${cutoff})...`);
-    
+
     let cacheDeletedCount = 0;
     try {
       // First count what we want to delete
       const toDeleteRes = await this.db.run(`?[query_hash] := *search_cache{query_hash, created_at}, created_at < $cutoff`, { cutoff });
       const toDeleteHashes = toDeleteRes.rows.map((r: any) => [r[0]]);
-       
-       if (toDeleteHashes.length > 0) {
-         console.error(`[Janitor] Deleting ${toDeleteHashes.length} cache entries...`);
-         // We use :delete with the hashes (as a list of lists)
-         const deleteRes = await this.db.run(`
+
+      if (toDeleteHashes.length > 0) {
+        console.error(`[Janitor] Deleting ${toDeleteHashes.length} cache entries...`);
+        // We use :delete with the hashes (as a list of lists)
+        const deleteRes = await this.db.run(`
            ?[query_hash] <- $hashes
            :delete search_cache {query_hash}
          `, { hashes: toDeleteHashes });
@@ -185,17 +185,17 @@ export class MemoryServer {
 
     if (picked.length === 0) {
       return args.confirm
-        ? { 
-            status: "no_op", 
-            criteria: { older_than_days: olderThanDays, max_observations: maxObservations, min_entity_degree: minEntityDegree },
-            cache_deleted: cacheDeletedCount
-          }
+        ? {
+          status: "no_op",
+          criteria: { older_than_days: olderThanDays, max_observations: maxObservations, min_entity_degree: minEntityDegree },
+          cache_deleted: cacheDeletedCount
+        }
         : {
-            status: "dry_run",
-            criteria: { older_than_days: olderThanDays, max_observations: maxObservations, min_entity_degree: minEntityDegree },
-            candidates: [],
-            cache_deleted: 0
-          };
+          status: "dry_run",
+          criteria: { older_than_days: olderThanDays, max_observations: maxObservations, min_entity_degree: minEntityDegree },
+          candidates: [],
+          cache_deleted: 0
+        };
     }
 
     if (!args.confirm) {
@@ -418,6 +418,140 @@ export class MemoryServer {
     return result.rows.map((r: any) => ({ entity_id: String(r[0]), community_id: String(r[1]) }));
   }
 
+  public async summarizeCommunities(args?: { min_community_size?: number; model?: string }) {
+    await this.initPromise;
+    const minSize = Math.max(2, Math.floor(args?.min_community_size ?? 3));
+    const model = args?.model ?? "demyagent-4b-i1:Q6_K";
+
+    console.error("[GraphRAG] Recomputing communities before summarization...");
+    const commResult = await this.recomputeCommunities();
+
+    if (commResult.length === 0) {
+      return { status: "no_data", generated_summaries: 0 };
+    }
+
+    // Group entities by community
+    const byCommunity = new Map<string, string[]>();
+    for (const row of commResult) {
+      const arr = byCommunity.get(row.community_id) ?? [];
+      arr.push(row.entity_id);
+      byCommunity.set(row.community_id, arr);
+    }
+
+    let generatedSummaries = 0;
+    const results = [];
+
+    for (const [communityId, entityIds] of byCommunity.entries()) {
+      if (entityIds.length < minSize) continue;
+
+      console.error(`[GraphRAG] Summarizing community ${communityId} with ${entityIds.length} members...`);
+
+      // Fetch details for all entities in this community
+      const entityInfos = [];
+      for (const eId of entityIds) {
+        try {
+          // get entity
+          const entRes = await this.db.run('?[name, type] := *entity{id: $id, name, type, @ "NOW"}', { id: eId });
+          if (entRes.rows.length > 0) {
+            const name = entRes.rows[0][0];
+            const type = entRes.rows[0][1];
+
+            // get top observations for this entity
+            const obsRes = await this.db.run('?[text, created_at] := *observation{entity_id: $id, text, created_at, @ "NOW"} :limit 3', { id: eId });
+            const obs = obsRes.rows.map((r: any) => r[0]);
+
+            entityInfos.push(`- ${name} (${type})` + (obs.length > 0 ? `\n  Notes: ${obs.join("; ")}` : ""));
+          }
+        } catch (e: any) {
+          console.warn(`[GraphRAG] Error fetching info for ${eId}: ${e.message}`);
+        }
+      }
+
+      if (entityInfos.length === 0) continue;
+
+      const systemPrompt = "You are an expert analyst. Summarize the following community of related entities into a single, cohesive 'Community Report'. Identify the overarching themes, topics, and connections between these entities. Respond ONLY with the finalized summary text.";
+      const userPrompt = `Community Size: ${entityIds.length}\n\nMembers & Notes:\n${entityInfos.join("\n")}`;
+
+      let summaryText = "";
+      try {
+        const ollamaMod: any = await import("ollama");
+        const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+        const response = await ollamaClient.chat({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        summaryText = (response as any)?.message?.content?.trim?.() ?? "";
+      } catch (e: any) {
+        console.warn(`[GraphRAG] Ollama error for community ${communityId}: ${e.message}`);
+      }
+
+      if (!summaryText || summaryText === "") {
+        console.warn(`[GraphRAG] Could not generate summary for community ${communityId}, skipping.`);
+        continue;
+      }
+
+      // Create new CommunitySummary entity
+      const nowIso = new Date().toISOString();
+      const summaryName = `Community Summary ${communityId.slice(0, 8)} (${nowIso.slice(0, 10)})`;
+
+      const sumEntity = await this.createEntity({
+        name: summaryName,
+        type: "CommunitySummary",
+        metadata: {
+          graphrag: {
+            kind: "community_summary",
+            community_id: communityId,
+            member_count: entityIds.length,
+            member_ids: entityIds,
+            model,
+            summarized_at: nowIso
+          }
+        }
+      });
+
+      const summaryEntityId = (sumEntity as any)?.id;
+      if (summaryEntityId) {
+        await this.addObservation({
+          entity_id: summaryEntityId,
+          text: summaryText,
+          metadata: {
+            graphrag: {
+              kind: "community_summary",
+              community_id: communityId,
+            }
+          }
+        });
+
+        // Link the summary to all members
+        for (const memberId of entityIds) {
+          await this.createRelation({
+            from_id: summaryEntityId,
+            to_id: memberId,
+            relation_type: "summary_of",
+            strength: 1.0,
+            metadata: { community_id: communityId }
+          });
+        }
+
+        generatedSummaries++;
+        results.push({
+          community_id: communityId,
+          summary_entity_id: summaryEntityId,
+          member_count: entityIds.length
+        });
+      }
+    }
+
+    return {
+      status: "completed",
+      generated_summaries: generatedSummaries,
+      results
+    };
+  }
+
   public async recomputeBetweennessCentrality() {
     await this.initPromise;
 
@@ -530,10 +664,10 @@ export class MemoryServer {
       temp_rank[entity_id, rank] <~ PageRank(edges[f, t, s])
       ?[entity_id, rank] := temp_rank[entity_id, rank]
     `.trim();
-    
+
     try {
       const result = await this.db.run(query);
-      
+
       // Save results
       for (const row of result.rows as any[]) {
         const entity_id = String(row[0]);
@@ -544,7 +678,7 @@ export class MemoryServer {
           { entity_id, pagerank }
         );
       }
-      
+
       console.error(`[PageRank] ${result.rows.length} entities ranked.`);
       return result.rows.map((r: any) => ({ entity_id: String(r[0]), pagerank: Number(r[1]) }));
     } catch (e: any) {
@@ -556,11 +690,11 @@ export class MemoryServer {
   private async setupSchema() {
     try {
       console.error("[Schema] Initializing schema...");
-      
+
       // Get embedding dimensions from service
       const EMBEDDING_DIM = this.embeddingService.getDimensions();
       console.error(`[Schema] Using embedding dimensions: ${EMBEDDING_DIM}`);
-      
+
       const existingRelations = await this.db.run("::relations");
       const relations = existingRelations.rows.map((r: any) => r[0]);
 
@@ -581,15 +715,15 @@ export class MemoryServer {
 
         if (!columns.includes("name_embedding") || !timeTravelReady) {
           // Drop indices before migration
-          try { await this.db.run("::hnsw drop entity:semantic"); } catch (e) {}
-          try { await this.db.run("::hnsw drop entity:name_semantic"); } catch (e) {}
-          try { await this.db.run("::fts drop entity:fts"); } catch (e) {}
-          
+          try { await this.db.run("::hnsw drop entity:semantic"); } catch (e) { }
+          try { await this.db.run("::hnsw drop entity:name_semantic"); } catch (e) { }
+          try { await this.db.run("::fts drop entity:fts"); } catch (e) { }
+
           const typesToDrop = ['person', 'project', 'task', 'note'];
           for (const type of typesToDrop) {
-            try { await this.db.run(`::hnsw drop entity:semantic_${type}`); } catch (e) {}
+            try { await this.db.run(`::hnsw drop entity:semantic_${type}`); } catch (e) { }
           }
-          
+
           if (!columns.includes("name_embedding")) {
             await this.db.run(`
               ?[id, created_at, name, type, embedding, name_embedding, metadata] :=
@@ -617,7 +751,7 @@ export class MemoryServer {
       } catch (e: any) {
         // We mostly ignore index errors, as ::hnsw create has no simple check
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Entity index notice:", e.message);
+          console.error("[Schema] Entity index notice:", e.message);
         }
       }
 
@@ -626,7 +760,7 @@ export class MemoryServer {
         console.error("[Schema] Entity Name-HNSW index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Entity name-index notice:", e.message);
+          console.error("[Schema] Entity name-index notice:", e.message);
         }
       }
 
@@ -638,7 +772,7 @@ export class MemoryServer {
           console.error(`[Schema] Entity HNSW index for ${type} created.`);
         } catch (e: any) {
           if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-              console.error(`[Schema] Entity index (${type}) notice:`, e.message);
+            console.error(`[Schema] Entity index (${type}) notice:`, e.message);
           }
         }
       }
@@ -655,9 +789,9 @@ export class MemoryServer {
         const timeTravelReady = await this.isTimeTravelReady("observation");
         if (!timeTravelReady) {
           // Drop indices before migration
-          try { await this.db.run("::hnsw drop observation:semantic"); } catch (e) {}
-          try { await this.db.run("::fts drop observation:fts"); } catch (e) {}
-          try { await this.db.run("::lsh drop observation:lsh"); } catch (e) {}
+          try { await this.db.run("::hnsw drop observation:semantic"); } catch (e) { }
+          try { await this.db.run("::fts drop observation:fts"); } catch (e) { }
+          try { await this.db.run("::lsh drop observation:lsh"); } catch (e) { }
 
           await this.db.run(`
             ?[id, created_at, entity_id, text, embedding, metadata] :=
@@ -668,13 +802,13 @@ export class MemoryServer {
           console.error("[Schema] Observation table migrated (Validity).");
         }
       }
-      
+
       try {
         await this.db.run(`{::hnsw create observation:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
         console.error("[Schema] Observation HNSW index created.");
       } catch (e: any) {
         if (!e.message.includes("already exists") && !e.message.includes("unexpected input")) {
-            console.error("[Schema] Observation index notice:", e.message);
+          console.error("[Schema] Observation index notice:", e.message);
         }
       }
 
@@ -732,7 +866,7 @@ export class MemoryServer {
         try {
           await this.db.run(`{:create search_cache {query_hash: String => query_text: String, results: Json, options: Json, embedding: <F32; ${EMBEDDING_DIM}>, created_at: Int}}`);
           console.error("[Schema] Search Cache table created.");
-          
+
           await this.db.run(`{::hnsw create search_cache:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
           console.error("[Schema] Search Cache HNSW index created.");
         } catch (e: any) {
@@ -913,9 +1047,9 @@ export class MemoryServer {
       const maxDepth = args.max_depth || 3;
 
       let seedQuery;
-      let params: any = { 
-        query_vector: queryEmbedding, 
-        limit: limit, 
+      let params: any = {
+        query_vector: queryEmbedding,
+        limit: limit,
         max_depth: maxDepth,
         topk: 100, // Increased for graph walking
         ef_search: 100
@@ -991,7 +1125,7 @@ export class MemoryServer {
 
   private resolveValiditySpec(as_of?: string) {
     if (!as_of || as_of === "NOW") return '"NOW"';
-    
+
     // Check if it's a numeric timestamp
     if (/^\d+$/.test(as_of)) {
       let ts = parseInt(as_of, 10);
@@ -1094,8 +1228,8 @@ export class MemoryServer {
       if (error.display) {
         console.error("CozoDB Error Details:", error.display);
       }
-      return { 
-        error: "Internal error creating entity", 
+      return {
+        error: "Internal error creating entity",
         message: error.message || String(error),
         details: error.stack,
         cozo_display: error.display
@@ -1126,7 +1260,7 @@ export class MemoryServer {
       if (res.rows.length === 0) {
         console.error("[User] Initializing global user profile...");
         await this.createEntityWithId(USER_ENTITY_ID, USER_ENTITY_NAME, USER_ENTITY_TYPE, { is_global_user: true });
-        
+
         await this.addObservation({
           entity_id: USER_ENTITY_ID,
           text: "This is the global user profile for preferences and work styles.",
@@ -1146,7 +1280,7 @@ export class MemoryServer {
 
       const name = args.name ?? current.rows[0][0];
       const type = args.type ?? current.rows[0][1];
-      
+
       // Conflict Detection (Application-Level Fallback for Triggers)
       const mergedMetadata = { ...(current.rows[0][2] || {}), ...(args.metadata || {}) };
       const status = mergedMetadata.status || "";
@@ -1169,7 +1303,7 @@ export class MemoryServer {
       const embedding = await this.embeddingService.embed(`${name} ${type}`);
       const name_embedding = await this.embeddingService.embed(name);
       const now = Date.now() * 1000;
-      
+
       // Using v0.7 :update and ++ for metadata merge (v1.7 Multi-Vector)
       await this.db.run(`
         ?[id, created_at, name, type, embedding, name_embedding, metadata] := 
@@ -1181,13 +1315,13 @@ export class MemoryServer {
           name_embedding = $name_embedding,
           metadata = old_meta ++ $new_meta
         :update entity {id, created_at, name, type, embedding, name_embedding, metadata}
-      `, { 
-        id: args.id, 
-        name, 
-        type, 
-        embedding, 
+      `, {
+        id: args.id,
+        name,
+        type,
+        embedding,
         name_embedding,
-        new_meta: args.metadata || {} 
+        new_meta: args.metadata || {}
       });
 
       return { status: "Entity updated", id: args.id };
@@ -1296,13 +1430,13 @@ export class MemoryServer {
       const suggestions = await this.formatInferredRelationsForContext(suggestionsRaw);
 
       const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
-      return { 
-        id, 
+      return {
+        id,
         entity_id: entityId,
         created_at: now,
         created_at_iso,
-        status: "Observation saved", 
-        inferred_suggestions: suggestions 
+        status: "Observation saved",
+        inferred_suggestions: suggestions
       };
     } catch (error: any) {
       return { error: error.message || "Unknown error" };
@@ -1363,13 +1497,13 @@ export class MemoryServer {
     });
 
     const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
-    return { 
+    return {
       from_id: args.from_id,
       to_id: args.to_id,
       relation_type: args.relation_type,
       created_at: now,
       created_at_iso,
-      status: "Relationship created" 
+      status: "Relationship created"
     };
   }
 
@@ -1507,8 +1641,8 @@ ids[id] <- $ids
       .map((id) => {
         const meta = metaById.get(id);
         if (!meta) {
-            // Fallback for missing entities
-            return { entity_id: id, name: "Unknown (Missing Entity)", type: "Unknown", hops: distance.get(id) ?? null };
+          // Fallback for missing entities
+          return { entity_id: id, name: "Unknown (Missing Entity)", type: "Unknown", hops: distance.get(id) ?? null };
         }
         return { entity_id: id, name: meta.name, type: meta.type, hops: distance.get(id) ?? null };
       })
@@ -1522,8 +1656,8 @@ ids[id] <- $ids
    * Returns a list of events (ASSERTED/RETRACTED) over time.
    * Optional filters for target entity and time range.
    */
-  public async getRelationEvolution(args: { 
-    from_id: string; 
+  public async getRelationEvolution(args: {
+    from_id: string;
     to_id?: string;
     since?: number; // Unix timestamp in ms
     until?: number; // Unix timestamp in ms
@@ -1627,9 +1761,10 @@ ids[id] <- $ids
     };
   }
 
-  public async reflectMemory(args: { entity_id?: string; model?: string }) {
+  public async reflectMemory(args: { entity_id?: string; model?: string; mode?: "summary" | "discovery" }) {
     await this.initPromise;
     const model = args.model ?? "demyagent-4b-i1:Q6_K";
+    const mode = args.mode ?? "summary";
     const targetEntityId = args.entity_id;
 
     let entitiesToReflect: Array<{ id: string; name: string; type: string }> = [];
@@ -1655,51 +1790,120 @@ ids[id] <- $ids
     const results: any[] = [];
 
     for (const entity of entitiesToReflect) {
-      const obsRes = await this.db.run('?[text, ts] := *observation{entity_id: $id, text, created_at, @ "NOW"}, ts = to_int(created_at) :order ts', {
-        id: entity.id,
-      });
+      if (mode === "summary") {
+        const obsRes = await this.db.run('?[text, ts] := *observation{entity_id: $id, text, created_at, @ "NOW"}, ts = to_int(created_at) :order ts', {
+          id: entity.id,
+        });
 
-      if (obsRes.rows.length < 2) {
-        results.push({ entity_id: entity.id, status: "skipped", reason: "Too few observations for reflection" });
-        continue;
-      }
+        if (obsRes.rows.length < 2) {
+          results.push({ entity_id: entity.id, status: "skipped", reason: "Too few observations for reflection" });
+          continue;
+        }
 
-      const observations = obsRes.rows.map((r: any) => `- [${new Date(Number(r[1]) / 1000).toISOString()}] ${r[0]}`);
+        const observations = obsRes.rows.map((r: any) => `- [${new Date(Number(r[1]) / 1000).toISOString()}] ${r[0]}`);
 
-      const systemPrompt = `You are an analytical memory module. Analyze the following observations about an entity. 
+        const systemPrompt = `You are an analytical memory module. Analyze the following observations about an entity. 
 Look for contradictions, temporal developments, behavioral patterns, or deeper insights. 
 Formulate a concise reflection (max. 3-4 sentences) that helps the user understand the current state or evolution.
 If there are contradictory statements, name them explicitly.
 If no special patterns are recognizable, answer with "No new insights".`;
 
-      const userPrompt = `Entity: ${entity.name} (${entity.type})\n\nObservations:\n${observations.join("\n")}`;
+        const userPrompt = `Entity: ${entity.name} (${entity.type})\n\nObservations:\n${observations.join("\n")}`;
 
-      let reflectionText: string;
-      try {
-        const ollamaMod: any = await import("ollama");
-        const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
-        const response = await ollamaClient.chat({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-        });
-        reflectionText = (response as any)?.message?.content?.trim?.() ?? "";
-      } catch (e: any) {
-        console.error(`[Reflect] Ollama error for ${entity.name}:`, e);
-        reflectionText = "";
-      }
+        let reflectionText: string;
+        try {
+          const ollamaMod: any = await import("ollama");
+          const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+          const response = await ollamaClient.chat({
+            model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+          });
+          reflectionText = (response as any)?.message?.content?.trim?.() ?? "";
+        } catch (e: any) {
+          console.error(`[Reflect] Ollama error for ${entity.name}:`, e);
+          reflectionText = "";
+        }
 
-      if (reflectionText && reflectionText !== "No new insights" && !reflectionText.includes("No new insights")) {
-        await this.addObservation({
-          entity_id: entity.id,
-          text: `Reflexive insight: ${reflectionText}`,
-          metadata: { kind: "reflection", model, generated_at: Date.now() },
-        });
-        results.push({ entity_id: entity.id, status: "reflected", insight: reflectionText });
-      } else {
-        results.push({ entity_id: entity.id, status: "no_insight_found" });
+        if (reflectionText && reflectionText !== "No new insights" && !reflectionText.includes("No new insights")) {
+          await this.addObservation({
+            entity_id: entity.id,
+            text: `Reflexive insight: ${reflectionText}`,
+            metadata: { kind: "reflection", model, generated_at: Date.now() },
+          });
+          results.push({ entity_id: entity.id, status: "reflected", insight: reflectionText });
+        } else {
+          results.push({ entity_id: entity.id, status: "no_insight_found" });
+        }
+      } else if (mode === "discovery") {
+        // Discovery Mode: Find and validate new relationships
+        const candidates = await this.inferenceEngine.getRefinementCandidates(entity.id);
+        const discoveryResults: any[] = [];
+        const suggestions: any[] = [];
+
+        for (const candidate of candidates) {
+          // Check if relationship already exists
+          const existing = await this.db.run(`
+            ?[count(from_id)] := *relationship{from_id, to_id, relation_type, @ "NOW"},
+              from_id = $from, to_id = $to, relation_type = $rel
+          `, { from: candidate.from_id, to: candidate.to_id, rel: candidate.relation_type });
+
+          if (Number(existing.rows[0][0]) > 0) continue;
+
+          // Load target entity details for context
+          const targetRes = await this.db.run('?[name, type] := *entity{id, name, type, @ "NOW"}, id = $id', { id: candidate.to_id });
+          const targetName = String(targetRes.rows[0][0]);
+          const targetType = String(targetRes.rows[0][1]);
+
+          const validatePrompt = `You are a Knowledge Graph specialized AI. Evaluate if the following suggested relationship is logically sound based on the reason provided.
+Source Entity: ${entity.name} (${entity.type})
+Target Entity: ${targetName} (${targetType})
+Suggested Relationship: ${candidate.relation_type}
+Reason: ${candidate.reason}
+
+Respond with a JSON object:
+{
+  "confidence": <0.0 to 1.0>,
+  "reasoning": "<short explanation>",
+  "verdict": "create" | "suggest" | "reject"
+}
+Assign "create" if confidence > 0.8, "suggest" if confidence > 0.5, else "reject".`;
+
+          try {
+            const ollamaMod: any = await import("ollama");
+            const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+            const response = await ollamaClient.chat({
+              model,
+              messages: [{ role: "user", content: validatePrompt }],
+              format: "json"
+            });
+            const validation = JSON.parse((response as any)?.message?.content ?? "{}");
+
+            if (validation.verdict === "create" && validation.confidence > 0.8) {
+              await this.createRelation({
+                from_id: candidate.from_id,
+                to_id: candidate.to_id,
+                relation_type: candidate.relation_type,
+                strength: validation.confidence,
+                metadata: { source: "reflection", reasoning: validation.reasoning, model }
+              });
+              discoveryResults.push({ target: targetName, type: candidate.relation_type, status: "created" });
+            } else if (validation.verdict === "suggest" || validation.confidence > 0.5) {
+              suggestions.push({
+                from_id: candidate.from_id,
+                to_id: candidate.to_id,
+                relation_type: candidate.relation_type,
+                confidence: validation.confidence,
+                reason: validation.reasoning
+              });
+            }
+          } catch (e) {
+            console.error(`[Discovery] Validation failed for ${targetName}:`, e);
+          }
+        }
+        results.push({ entity_id: entity.id, status: "discovery_completed", created: discoveryResults, suggestions });
       }
     }
 
@@ -1726,7 +1930,7 @@ If no special patterns are recognizable, answer with "No new insights".`;
     const activeRe =
       "(?i).*(\\bactive\\b|\\brunning\\b|\\bongoing\\b|in\\s+operation|continues|continued|not\\s+discontinued).*";
     const inactiveRe =
-        "(?i).*(discontinued|cancelled|stopped|shut\\s+down|closed|shutdown|deprecated|archived|terminated|abandoned).*";
+      "(?i).*(discontinued|cancelled|stopped|shut\\s+down|closed|shutdown|deprecated|archived|terminated|abandoned).*";
 
     const latestByRegex = async (re: string) => {
       const res = await this.db.run(
@@ -1841,7 +2045,7 @@ ids[id] <- $ids
         const validationRes = await this.db.run(args.datalog, { id: "validation-test" });
         const expectedHeaders = ["from_id", "to_id", "relation_type", "confidence", "reason"];
         const actualHeaders = validationRes.headers;
-        
+
         const missingHeaders = expectedHeaders.filter(h => !actualHeaders.includes(h));
         if (missingHeaders.length > 0) {
           return { error: `Invalid Datalog result set. Missing columns: ${missingHeaders.join(", ")}. Expected: ${expectedHeaders.join(", ")}` };
@@ -1899,7 +2103,7 @@ ids[id] <- $ids
       if (!args.file_path && !args.content) {
         return { error: "Either file_path or content must be provided" };
       }
-      
+
       // Read content from file if file_path is provided
       let content: string;
       if (args.file_path) {
@@ -1910,13 +2114,13 @@ ids[id] <- $ids
             const loadingTask = getDocument({ data });
             const pdf = await loadingTask.promise;
             const numPages = pdf.numPages;
-            
+
             const pageTextPromises = Array.from({ length: numPages }, async (_, i) => {
               const page = await pdf.getPage(i + 1);
               const textContent = await page.getTextContent();
               return textContent.items.map((item: any) => item.str).join(' ');
             });
-            
+
             const pageTexts = await Promise.all(pageTextPromises);
             content = pageTexts.join('\n').trim();
           } else {
@@ -1928,7 +2132,7 @@ ids[id] <- $ids
       } else {
         content = (args.content ?? "").trim();
       }
-      
+
       if (!content) return { error: "Content must not be empty" };
 
       let entityId: string | undefined = undefined;
@@ -2039,21 +2243,21 @@ ids[id] <- $ids
     const startTime = Date.now();
     try {
       console.error(`[Delete] Starting deletion for entity: ${args.entity_id}`);
-      
+
       // 1. Check if entity exists
       const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: args.entity_id });
       if (entityRes.rows.length === 0) {
         console.error(`[Delete] Entity not found: ${args.entity_id}`);
         return { error: `Entity with ID '${args.entity_id}' not found` };
       }
-      
+
       console.error(`[Delete] Entity found: ${entityRes.rows[0][0]}`);
 
       // 2. Count related data before deletion
       const obsCount = await this.db.run('?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $id', { id: args.entity_id });
       const relOutCount = await this.db.run('?[count(from_id)] := *relationship{from_id, to_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
       const relInCount = await this.db.run('?[count(to_id)] := *relationship{from_id, to_id, @ "NOW"}, to_id = $id', { id: args.entity_id });
-      
+
       console.error(`[Delete] Related data: ${obsCount.rows[0][0]} observations, ${relOutCount.rows[0][0]} outgoing relations, ${relInCount.rows[0][0]} incoming relations`);
 
       // 3. Delete all related data in a transaction (block)
@@ -2064,15 +2268,15 @@ ids[id] <- $ids
         { ?[from_id, to_id, relation_type, created_at] := *relationship{from_id, to_id, relation_type, created_at}, to_id = $target_id :rm relationship {from_id, to_id, relation_type, created_at} }
         { ?[id, created_at] := *entity{id, created_at}, id = $target_id :rm entity {id, created_at} }
       `, { target_id: args.entity_id });
-      
+
       // 4. Verify deletion
       const verifyEntity = await this.db.run('?[id] := *entity{id, @ "NOW"}, id = $id', { id: args.entity_id });
       const verifyObs = await this.db.run('?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $id', { id: args.entity_id });
       const verifyRelOut = await this.db.run('?[count(from_id)] := *relationship{from_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
       const verifyRelIn = await this.db.run('?[count(to_id)] := *relationship{to_id, @ "NOW"}, to_id = $id', { id: args.entity_id });
-      
+
       console.error(`[Delete] Verification: entity exists=${verifyEntity.rows.length > 0}, observations=${verifyObs.rows[0][0]}, outgoing_relations=${verifyRelOut.rows[0][0]}, incoming_relations=${verifyRelIn.rows[0][0]}`);
-      
+
       if (verifyEntity.rows.length > 0) {
         console.error(`[Delete] WARNING: Entity still visible after deletion!`);
       } else {
@@ -2080,7 +2284,7 @@ ids[id] <- $ids
       }
 
       this.trackOperation('delete_entity', startTime);
-      return { 
+      return {
         status: "Entity and all related data deleted",
         deleted: {
           observations: obsCount.rows[0][0],
@@ -2095,7 +2299,7 @@ ids[id] <- $ids
     }
   }
 
-  public async runTransaction(args: { 
+  public async runTransaction(args: {
     operations: Array<{
       action: "create_entity" | "add_observation" | "create_relation" | "delete_entity";
       params: any;
@@ -2115,20 +2319,20 @@ ids[id] <- $ids
       for (let i = 0; i < args.operations.length; i++) {
         const op = args.operations[i];
         const suffix = `_${i}`;
-        
+
         let params = op.params;
         if (typeof params === 'string') {
-            try {
-                params = JSON.parse(params);
-            } catch (e) {
-                return { error: `Invalid JSON parameters (Parse Error) in operation ${i}` };
-            }
+          try {
+            params = JSON.parse(params);
+          } catch (e) {
+            return { error: `Invalid JSON parameters (Parse Error) in operation ${i}` };
+          }
         }
 
         if (!params || typeof params !== 'object') {
-            return { error: `Invalid parameter structure (not an object) in operation ${i}` };
+          return { error: `Invalid parameter structure (not an object) in operation ${i}` };
         }
-        
+
         switch (op.action) {
           case "create_entity": {
             const { name, type, metadata } = params;
@@ -2136,7 +2340,7 @@ ids[id] <- $ids
             const embedding = await this.embeddingService.embed(`${name || "unknown"} ${type || "unknown"}`);
             const name_embedding = await this.embeddingService.embed(name || "unknown");
             const now = Date.now() * 1000;
-            
+
             if (name) {
               createdEntityIds.set(name, id);
             }
@@ -2147,7 +2351,7 @@ ids[id] <- $ids
             allParams[`embedding${suffix}`] = embedding;
             allParams[`name_embedding${suffix}`] = name_embedding;
             allParams[`metadata${suffix}`] = metadata || {};
-            
+
             statements.push(`
               {
                 ?[id, created_at, name, type, embedding, name_embedding, metadata] <- [
@@ -2158,54 +2362,54 @@ ids[id] <- $ids
             results.push({ action: "create_entity", id, name });
             break;
           }
-          
+
           case "add_observation": {
             let { entity_id, entity_name, entity_type, text, metadata } = params;
-            
+
             // Resolve entity_id if not provided
             if (!entity_id) {
-               if (entity_name) {
-                  // 1. Check if created in this transaction
-                  if (createdEntityIds.has(entity_name)) {
-                     entity_id = createdEntityIds.get(entity_name);
+              if (entity_name) {
+                // 1. Check if created in this transaction
+                if (createdEntityIds.has(entity_name)) {
+                  entity_id = createdEntityIds.get(entity_name);
+                } else {
+                  // 2. Lookup in DB
+                  const existing = await this.findEntityIdByName(entity_name);
+                  if (existing) {
+                    entity_id = existing;
                   } else {
-                     // 2. Lookup in DB
-                     const existing = await this.findEntityIdByName(entity_name);
-                     if (existing) {
-                        entity_id = existing;
-                     } else {
-                        // 3. Auto-create entity
-                        const newId = uuidv4();
-                        const newName = entity_name;
-                        const newType = entity_type || "Unknown";
-                        const newEmbedding = await this.embeddingService.embed(`${newName} ${newType}`);
-                        const newNameEmbedding = await this.embeddingService.embed(newName);
-                        const newNow = Date.now() * 1000;
-                        const createSuffix = `${suffix}_autocreate`;
+                    // 3. Auto-create entity
+                    const newId = uuidv4();
+                    const newName = entity_name;
+                    const newType = entity_type || "Unknown";
+                    const newEmbedding = await this.embeddingService.embed(`${newName} ${newType}`);
+                    const newNameEmbedding = await this.embeddingService.embed(newName);
+                    const newNow = Date.now() * 1000;
+                    const createSuffix = `${suffix}_autocreate`;
 
-                        allParams[`id${createSuffix}`] = newId;
-                        allParams[`name${createSuffix}`] = newName;
-                        allParams[`type${createSuffix}`] = newType;
-                        allParams[`embedding${createSuffix}`] = newEmbedding;
-                        allParams[`name_embedding${createSuffix}`] = newNameEmbedding;
-                        allParams[`metadata${createSuffix}`] = {}; // Default metadata
+                    allParams[`id${createSuffix}`] = newId;
+                    allParams[`name${createSuffix}`] = newName;
+                    allParams[`type${createSuffix}`] = newType;
+                    allParams[`embedding${createSuffix}`] = newEmbedding;
+                    allParams[`name_embedding${createSuffix}`] = newNameEmbedding;
+                    allParams[`metadata${createSuffix}`] = {}; // Default metadata
 
-                        statements.push(`
+                    statements.push(`
                           {
                             ?[id, created_at, name, type, embedding, name_embedding, metadata] <- [
                               [$id${createSuffix}, [${newNow}, true], $name${createSuffix}, $type${createSuffix}, $embedding${createSuffix}, $name_embedding${createSuffix}, $metadata${createSuffix}]
                             ] :insert entity {id, created_at => name, type, embedding, name_embedding, metadata}
                           }
                         `);
-                        
-                        createdEntityIds.set(newName, newId);
-                        entity_id = newId;
-                        results.push({ action: "create_entity (auto)", id: newId, name: newName });
-                     }
+
+                    createdEntityIds.set(newName, newId);
+                    entity_id = newId;
+                    results.push({ action: "create_entity (auto)", id: newId, name: newName });
                   }
-               } else {
-                  return { error: `entity_id or entity_name is required for add_observation in operation ${i}` };
-               }
+                }
+              } else {
+                return { error: `entity_id or entity_name is required for add_observation in operation ${i}` };
+              }
             }
 
             const id = params.id || uuidv4();
@@ -2231,25 +2435,25 @@ ids[id] <- $ids
 
           case "create_relation": {
             let { from_id, to_id, relation_type, strength, metadata } = params;
-            
+
             // 1. Check if IDs are actually names of entities created in this transaction
             if (createdEntityIds.has(from_id)) {
-                from_id = createdEntityIds.get(from_id);
+              from_id = createdEntityIds.get(from_id);
             } else if (!uuidValidate(from_id)) {
-                // 2. Try to resolve from DB if not UUID (and not found in local transaction)
-                const existingId = await this.findEntityIdByName(from_id);
-                if (existingId) {
-                    from_id = existingId;
-                }
+              // 2. Try to resolve from DB if not UUID (and not found in local transaction)
+              const existingId = await this.findEntityIdByName(from_id);
+              if (existingId) {
+                from_id = existingId;
+              }
             }
 
             if (createdEntityIds.has(to_id)) {
-                to_id = createdEntityIds.get(to_id);
+              to_id = createdEntityIds.get(to_id);
             } else if (!uuidValidate(to_id)) {
-                const existingId = await this.findEntityIdByName(to_id);
-                if (existingId) {
-                    to_id = existingId;
-                }
+              const existingId = await this.findEntityIdByName(to_id);
+              if (existingId) {
+                to_id = existingId;
+              }
             }
 
             // FIX: Validate that both entities exist before creating relation
@@ -2296,7 +2500,7 @@ ids[id] <- $ids
           case "delete_entity": {
             const { entity_id } = params;
             if (!entity_id) {
-               return { error: `Missing entity_id for delete_entity in operation ${i}` };
+              return { error: `Missing entity_id for delete_entity in operation ${i}` };
             }
 
             allParams[`target_id${suffix}`] = entity_id;
@@ -2317,11 +2521,11 @@ ids[id] <- $ids
             statements.push(`
               { ?[id, created_at] := *entity{id, created_at}, id = $target_id${suffix} :rm entity {id, created_at} }
             `);
-            
+
             results.push({ action: "delete_entity", id: entity_id });
             break;
           }
-          
+
           default:
             return { error: `Unknown operation: ${(op as any).action}` };
         }
@@ -2329,20 +2533,20 @@ ids[id] <- $ids
 
       const transactionQuery = statements.join("\n");
       console.error(`[Transaction] Executing ${statements.length} operations atomically...`);
-      
+
       await this.db.run(transactionQuery, allParams);
-      
-      return { 
-        status: "success", 
+
+      return {
+        status: "success",
         message: `${statements.length} operations executed atomically`,
-        results 
+        results
       };
     } catch (error: any) {
       console.error("Error in runTransaction:", error);
-      return { 
-        error: "Transaction failed", 
+      return {
+        error: "Transaction failed",
         message: error.message,
-        cozo_display: error.display 
+        cozo_display: error.display
       };
     }
   }
@@ -2354,7 +2558,7 @@ ids[id] <- $ids
     const communityRes = await this.db.run(`
       ?[entity_id, community_id] := *entity_community{entity_id, community_id}
     `);
-    
+
     const entityToCommunity = new Map<string, string>();
     for (const row of communityRes.rows as any[]) {
       entityToCommunity.set(String(row[0]), String(row[1]));
@@ -2454,19 +2658,19 @@ ids[id] <- $ids
     });
   }
 
-  public async editUserProfile(args: { 
-    name?: string; 
-    type?: string; 
+  public async editUserProfile(args: {
+    name?: string;
+    type?: string;
     metadata?: any;
     observations?: Array<{ text: string; metadata?: any }>;
     clear_observations?: boolean;
   }) {
     try {
       const current = await this.db.run(
-        '?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}', 
+        '?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}',
         { id: USER_ENTITY_ID }
       );
-      
+
       if (current.rows.length === 0) {
         return { error: "User profile not found. Initialize it first." };
       }
@@ -2478,7 +2682,7 @@ ids[id] <- $ids
           type: args.type,
           metadata: args.metadata
         });
-        
+
         if (updateResult.error) {
           return updateResult;
         }
@@ -2489,7 +2693,7 @@ ids[id] <- $ids
           '?[id] := *observation{id, entity_id: $eid, @ "NOW"}',
           { eid: USER_ENTITY_ID }
         );
-        
+
         for (const row of existingObs.rows) {
           await this.db.run(
             '?[id, entity_id, text, embedding, metadata, created_at] := *observation{id, entity_id, text, embedding, metadata, created_at, @ "NOW"}, id = $id :delete observation {id, entity_id, text, embedding, metadata, created_at}',
@@ -2513,7 +2717,7 @@ ids[id] <- $ids
         '?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}',
         { id: USER_ENTITY_ID }
       );
-      
+
       const observations = await this.db.run(
         '?[id, text, metadata] := *observation{id, entity_id: $eid, text, metadata, @ "NOW"}',
         { eid: USER_ENTITY_ID }
@@ -2721,21 +2925,21 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
       execute: async (args: any) => {
         await this.initPromise;
         console.error(`[mutate_memory] Call with:`, JSON.stringify(args, null, 2));
-        
+
         // Zod discriminatedUnion is strict. We try to parse it more flexibly.
         const parsed = MutateMemorySchema.safeParse(args);
         if (!parsed.success) {
           console.error(`[mutate_memory] Validation error:`, JSON.stringify(parsed.error.issues, null, 2));
-          
 
-          
-          return JSON.stringify({ 
-            error: "Invalid input for action: " + args.action, 
+
+
+          return JSON.stringify({
+            error: "Invalid input for action: " + args.action,
             issues: parsed.error.issues,
-            received: args 
+            received: args
           });
         }
-        
+
         const { action, ...rest } = parsed.data as any;
 
         if (action === "create_entity") return JSON.stringify(await this.createEntity(rest));
@@ -2813,13 +3017,18 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         max_depth: z.number().min(1).max(5).optional().default(3).describe("Maximum walking depth"),
         limit: z.number().optional().default(5).describe("Number of results"),
       }),
+      z.object({
+        action: z.literal("agentic_search"),
+        query: z.string().describe("Context query for agentic routing"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
+      }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search"])
         .describe("Action (determines which fields are required)"),
-      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking"),
+      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search"),
       limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking"),
       filters: z.any().optional().describe("Only for advancedSearch"),
       graphConstraints: z.any().optional().describe("Only for advancedSearch"),
@@ -2848,8 +3057,9 @@ Supported actions:
 - 'history': Retrieve historical evolution of an entity. Params: { entity_id: string }.
 - 'graph_rag': Graph-based reasoning (Hybrid RAG). Finds semantic vector seeds first, then expands via graph traversals. Ideal for multi-hop reasoning. Params: { query: string, max_depth?: number, limit?: number }.
 - 'graph_walking': Recursive semantic graph search. Starts at vector seeds or an entity and follows relationships to other semantically relevant entities. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
+- 'agentic_search': Auto-Routing Search. Uses local LLM to analyze intent and routes the query automatically to the best strategy (Vector, Graph, or Community Summaries). Params: { query: string, limit?: number }.
 
-Notes: 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
+Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -3031,6 +3241,17 @@ Notes: 'context' is ideal for exploratory questions. 'search' and 'advancedSearc
           };
 
           return JSON.stringify(context);
+        }
+
+        if (input.action === "agentic_search") {
+          if (!input.query || input.query.trim().length === 0) {
+            return JSON.stringify({ error: "Search query must not be empty." });
+          }
+          const results = await this.hybridSearch.agenticRetrieve({
+            query: input.query,
+            limit: input.limit,
+          });
+          return JSON.stringify(results);
         }
 
         if (input.action === "graph_rag") {
@@ -3433,7 +3654,7 @@ Supported actions:
             }
 
             const res = await this.db.run(query, params);
-            
+
             const history = res.rows.map((r: any) => ({
               timestamp: r[0],
               iso_date: new Date(r[0] / 1000).toISOString(), // Cozo uses microseconds for Validity
@@ -3445,12 +3666,12 @@ Supported actions:
             }));
 
             // Group by relationship (target + type) to show transitions
-    const evolution: Record<string, any[]> = {};
-    history.forEach((h: any) => {
-      const key = `${h.target_name}:${h.relation_type}`;
-      if (!evolution[key]) evolution[key] = [];
-      evolution[key].push(h);
-    });
+            const evolution: Record<string, any[]> = {};
+            history.forEach((h: any) => {
+              const key = `${h.target_name}:${h.relation_type}`;
+              if (!evolution[key]) evolution[key] = [];
+              evolution[key].push(h);
+            });
 
             return JSON.stringify({
               from_name: fromName,
@@ -3479,9 +3700,9 @@ Supported actions:
             const startName = entityRes.rows[0][0];
 
             console.error(`[SemanticWalk] Starting walk for '${startName}' (${startEntityId}) - Depth: ${maxDepth}, MinSim: ${minSimilarity}`);
-            
+
             const results = await this.inferenceEngine.semanticGraphWalk(startEntityId, maxDepth, minSimilarity);
-            
+
             // Enrich results with names
             const enrichedResults = await Promise.all(results.map(async (r) => {
               const nameRes = await this.db.run('?[name, type] := *entity{id: $id, name, type, @ "NOW"}', { id: r.entity_id });
@@ -3560,16 +3781,22 @@ Supported actions:
         action: z.literal("reflect"),
         entity_id: z.string().optional().describe("Optional entity ID for targeted reflection"),
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
+        mode: z.enum(["summary", "discovery"]).optional().default("summary").describe("Reflection mode: 'summary' for insights, 'discovery' for new links"),
       }),
       z.object({
         action: z.literal("clear_memory"),
         confirm: z.boolean().describe("Must be true to confirm deletion"),
       }),
+      z.object({
+        action: z.literal("summarize_communities"),
+        model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
+        min_community_size: z.number().min(2).max(100).optional().default(3),
+      }),
     ]);
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory"])
+        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory", "summarize_communities"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -3588,8 +3815,10 @@ Supported actions:
       older_than_days: z.number().optional().describe("Optional for cleanup"),
       max_observations: z.number().optional().describe("Optional for cleanup"),
       min_entity_degree: z.number().optional().describe("Optional for cleanup"),
-      model: z.string().optional().describe("Optional for cleanup/reflect"),
+      model: z.string().optional().describe("Optional for cleanup/reflect/summarize_communities"),
       entity_id: z.string().optional().describe("Optional for reflect"),
+      min_community_size: z.number().optional().describe("Optional for summarize_communities"),
+      mode: z.enum(["summary", "discovery"]).optional().describe("Optional for reflect"),
     });
 
     this.mcp.addTool({
@@ -3614,7 +3843,8 @@ Supported actions:
   * With confirm=false: Dry-Run (shows candidates).
   * With confirm=true: Merges old/isolated fragments using LLM (Executive Summary) and removes noise.
 - 'reflect': Reflection service. Analyzes memory for contradictions and insights. Params: { entity_id?: string, model?: string }.
-- 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.`,
+- 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.
+- 'summarize_communities': Hierarchical GraphRAG. Generates summaries for entity clusters. Params: { model?: string, min_community_size?: number }.`,
       parameters: ManageSystemParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -3637,7 +3867,7 @@ Supported actions:
                 observations: obsResult.rows.length,
                 relations: relResult.rows.length,
               },
-              performance: { 
+              performance: {
                 embedding_cache: this.embeddingService.getCacheStats(),
                 last_operation_ms: this.metrics.performance.last_operation_ms,
                 avg_operation_ms: this.metrics.performance.avg_operation_ms,
@@ -3653,7 +3883,7 @@ Supported actions:
             return JSON.stringify({ status: "error", error: error.message, timestamp: new Date().toISOString() });
           }
         }
-        
+
         if (input.action === "metrics") {
           try {
             return JSON.stringify({
@@ -3678,7 +3908,7 @@ Supported actions:
               entityTypes: input.entityTypes,
               since: input.since
             });
-            
+
             if (result.format === 'obsidian' && result.zipBuffer) {
               // For Obsidian ZIP, return base64 encoded buffer
               return JSON.stringify({
@@ -3689,7 +3919,7 @@ Supported actions:
                 filename: `memory_export_${Date.now()}.zip`
               });
             }
-            
+
             return JSON.stringify(result);
           } catch (error: any) {
             return JSON.stringify({ error: "Export failed", message: error.message });
@@ -3830,10 +4060,23 @@ Supported actions:
             const result = await this.reflectMemory({
               entity_id: input.entity_id,
               model: input.model,
+              mode: input.mode,
             });
             return JSON.stringify(result);
           } catch (error: any) {
             return JSON.stringify({ error: error.message || "Error during reflection" });
+          }
+        }
+
+        if (input.action === "summarize_communities") {
+          try {
+            const result = await this.summarizeCommunities({
+              model: input.model,
+              min_community_size: input.min_community_size,
+            });
+            return JSON.stringify(result);
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error during summarize_communities" });
           }
         }
 

@@ -45,6 +45,14 @@ export class InferenceEngine {
     return results;
   }
 
+  /**
+   * Aggregates potential links from all strategies for the "discovery" mode of reflection.
+   */
+  async getRefinementCandidates(entityId: string): Promise<InferredRelation[]> {
+    // This is essentially the same as inferRelations but explicitly for refinement
+    return this.inferRelations(entityId);
+  }
+
 
   async inferImplicitRelations(entityId: string): Promise<InferredRelation[]> {
     const expertise = await this.findTransitiveExpertise(entityId);
@@ -67,7 +75,7 @@ export class InferenceEngine {
           reason = concat('Mention of ', other_name, ' in observations')
       `;
       const res = await this.db.run(query, { target: entityId });
-      
+
       return res.rows.map((row: any) => ({
         from_id: entityId,
         to_id: row[0],
@@ -259,10 +267,10 @@ export class InferenceEngine {
 
       // Post-processing in JS: Select best path type per ID
       const bestPaths = new Map<string, any>();
-      
+
       for (const row of res.rows) {
         const [id, depth, score, type] = row;
-        
+
         // Cozo sometimes returns arrays or raw values, ensure we have Strings/Numbers
         const cleanId = String(id);
         const cleanDepth = Number(depth);
@@ -270,12 +278,12 @@ export class InferenceEngine {
         const cleanType = String(type);
 
         if (!bestPaths.has(cleanId) || cleanScore > bestPaths.get(cleanId).path_score) {
-            bestPaths.set(cleanId, {
-                entity_id: cleanId,
-                distance: cleanDepth,
-                path_score: cleanScore,
-                path_type: cleanType
-            });
+          bestPaths.set(cleanId, {
+            entity_id: cleanId,
+            distance: cleanDepth,
+            path_score: cleanScore,
+            path_type: cleanType
+          });
         }
       }
 
@@ -291,10 +299,10 @@ export class InferenceEngine {
    * This is extremely fast because no vector calculations (K-Means) are necessary,
    * but the already indexed neighborhood topology is used.
    */
-  async analyzeHnswClusters(): Promise<{ 
-    cluster_id: number; 
-    size: number; 
-    examples: string[] 
+  async analyzeHnswClusters(): Promise<{
+    cluster_id: number;
+    size: number;
+    examples: string[]
   }[]> {
     try {
       const query = `
@@ -321,7 +329,7 @@ export class InferenceEngine {
       `;
 
       const res = await this.db.run(query);
-      
+
       // Post-Processing: Aggregation in JS
       const clusterMap = new Map<number, { size: number; examples: string[] }>();
 
@@ -332,7 +340,7 @@ export class InferenceEngine {
         if (!clusterMap.has(clusterId)) {
           clusterMap.set(clusterId, { size: 0, examples: [] });
         }
-        
+
         const entry = clusterMap.get(clusterId)!;
         entry.size++;
         if (entry.examples.length < 5) {
@@ -370,13 +378,13 @@ export class InferenceEngine {
             if (!r || r.length < 5) continue;
             const fromId = String(r[0]);
             const toId = String(r[1]);
-            
+
             // FIX: Filter out self-references
             if (fromId === toId) {
               console.error(`[Inference] Skipping self-reference in custom rule ${ruleName}: ${fromId} -> ${toId}`);
               continue;
             }
-            
+
             results.push({
               from_id: fromId,
               to_id: toId,

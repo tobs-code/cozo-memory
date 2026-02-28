@@ -34,3 +34,4 @@ mcp_config.example.json
 nginx.conf
 Low-Hanging-Fruit.md
 EMBEDDING_MODEL_*.*
+sota_memory_analysis.md
