@@ -368,9 +368,18 @@ export class InferenceEngine {
           const res = await this.db.run(datalog, { id: entityId });
           for (const r of res.rows as any[]) {
             if (!r || r.length < 5) continue;
+            const fromId = String(r[0]);
+            const toId = String(r[1]);
+            
+            // FIX: Filter out self-references
+            if (fromId === toId) {
+              console.error(`[Inference] Skipping self-reference in custom rule ${ruleName}: ${fromId} -> ${toId}`);
+              continue;
+            }
+            
             results.push({
-              from_id: String(r[0]),
-              to_id: String(r[1]),
+              from_id: fromId,
+              to_id: toId,
               relation_type: String(r[2]),
               confidence: Number(r[3]),
               reason: String(r[4]),

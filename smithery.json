@@ -1,0 +1,26 @@
+{
+  "name": "@tobs-code/cozo-memory",
+  "description": "Local-first memory system for AI agents with hybrid search and graph reasoning",
+  "version": "1.0.3",
+  "homepage": "https://github.com/tobs-code/cozo-memory",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tobs-code/cozo-memory"
+  },
+  "install": {
+    "type": "npm",
+    "package": "cozo-memory"
+  },
+  "transport": "stdio",
+  "tags": [
+    "memory",
+    "graph-database",
+    "vector-search",
+    "hybrid-search",
+    "embeddings",
+    "knowledge-graph",
+    "cozodb",
+    "rag",
+    "graph-rag"
+  ]
+}
