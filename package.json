@@ -1,10 +1,28 @@
 {
   "name": "cozo-memory",
   "version": "1.0.0",
-  "description": "",
+  "description": "Local-first persistent memory system for AI agents with hybrid search, graph reasoning, and MCP integration",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cozo-memory": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tobs-code/cozo-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tobs-code/cozo-memory/issues"
+  },
+  "homepage": "https://github.com/tobs-code/cozo-memory#readme",
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "start": "node dist/index.js",
     "bridge": "tsc && node dist/api_bridge.js",
     "dev": "ts-node src/index.ts",
@@ -14,8 +32,19 @@
     "benchmark": "ts-node src/benchmark.ts",
     "download-model": "ts-node src/download-model.ts"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "memory",
+    "ai",
+    "agent",
+    "cozodb",
+    "graph-database",
+    "vector-search",
+    "hybrid-search",
+    "embeddings",
+    "knowledge-graph"
+  ],
+  "author": "tobs <tobsgo1@gmail.com>",
   "license": "Apache-2.0",
   "type": "commonjs",
   "dependencies": {

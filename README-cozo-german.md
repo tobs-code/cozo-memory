@@ -4,6 +4,27 @@
 
 Ein lokales, Single-User Memory-System basierend auf CozoDB mit MCP (Model Context Protocol) Integration. Fokus: robuste Speicherung, schnelle Hybrid-Suche (Vektor/Graph/Keyword), Time-Travel-Abfragen und wartungsfreundliche Konsolidierung.
 
+## Installation
+
+### Via npm (Empfohlen)
+
+```bash
+# Global installieren
+npm install -g cozo-memory
+
+# Oder direkt mit npx nutzen (keine Installation nötig)
+npx cozo-memory
+```
+
+### Aus dem Quellcode
+
+```bash
+git clone https://github.com/tobs-code/cozo-memory
+cd cozo-memory
+npm install && npm run build
+npm run start
+```
+
 ## Überblick
 
 Dieses Repository enthält:

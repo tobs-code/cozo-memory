@@ -47,3 +47,9 @@ Dockerfile
 
 # Package Lock
 package-lock.json
+
+
+.venv/
+.kiro/
+powers/
+.blackboxrules

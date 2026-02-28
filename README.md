@@ -6,6 +6,18 @@ A local, single-user memory system based on CozoDB with MCP (Model Context Proto
 
 ## Quick Start
 
+### Option 1: Install via npm (Recommended)
+
+```bash
+# Install globally
+npm install -g cozo-memory
+
+# Or run directly with npx (no installation needed)
+npx cozo-memory
+```
+
+### Option 2: Build from Source
+
 ```bash
 git clone https://github.com/tobs-code/cozo-memory
 cd cozo-memory
@@ -141,9 +153,21 @@ This tool (`src/benchmark.ts`) performs the following tests:
 - Node.js 20+ (recommended)
 - CozoDB native dependency is installed via `cozo-node`.
 
-### Setup
+### Via npm (Easiest)
 
 ```bash
+# Install globally
+npm install -g cozo-memory
+
+# Or use npx without installation
+npx cozo-memory
+```
+
+### From Source
+
+```bash
+git clone https://github.com/tobs-code/cozo-memory
+cd cozo-memory
 npm install
 npm run build
 ```
@@ -173,6 +197,33 @@ npm run start
 Default database path: `memory_db.cozo.db` in project root (created automatically).
 
 ### Claude Desktop Integration
+
+#### Using npx (Recommended)
+
+```json
+{
+  "mcpServers": {
+    "cozo-memory": {
+      "command": "npx",
+      "args": ["cozo-memory"]
+    }
+  }
+}
+```
+
+#### Using global installation
+
+```json
+{
+  "mcpServers": {
+    "cozo-memory": {
+      "command": "cozo-memory"
+    }
+  }
+}
+```
+
+#### Using local build
 
 ```json
 {

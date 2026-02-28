@@ -1,0 +1,33 @@
+# Source files
+src/
+tsconfig.json
+
+# Tests and benchmarks
+src/test-*.ts
+src/benchmark*.ts
+src/full-system-test.ts
+
+# Development
+.venv/
+.cache/
+.kiro/
+node_modules/
+*.log
+
+# Database files
+*.cozo.db
+*.db
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+nul
+mcp_config.json
+mcp_config.example.json
+nginx.conf

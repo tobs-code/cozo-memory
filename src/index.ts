@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { EmbeddingService } from "./embedding-service";
 
 import { FastMCP } from "fastmcp";
