@@ -35,13 +35,15 @@ app.post("/api/entities", async (req, res) => {
   try {
     // We use the same logic as in create_entity tool
     const id = uuidv4();
-    const embedding = await memoryServer.embeddingService.embed(name + " " + type);
+    const content = name + " " + type;
+    const embedding = await memoryServer.embeddingService.embed(content);
+    const nameEmbedding = await memoryServer.embeddingService.embed(name);
     
     await memoryServer.db.run(
       `
-        ?[id, created_at, name, type, embedding, metadata] <- [
-          [$id, "ASSERT", $name, $type, [${embedding.join(",")}], $metadata]
-        ] :put entity {id, created_at => name, type, embedding, metadata}
+        ?[id, created_at, name, type, embedding, name_embedding, metadata] <- [
+          [$id, "ASSERT", $name, $type, [${embedding.join(",")}], [${nameEmbedding.join(",")}], $metadata]
+        ] :put entity {id, created_at => name, type, embedding, name_embedding, metadata}
       `,
       { id, name, type, metadata: metadata || {} }
     );

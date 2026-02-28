@@ -1116,7 +1116,8 @@ export class MemoryServer {
       ] :insert entity {id, created_at => name, type, embedding, name_embedding, metadata}
     `, { id, name, type, embedding, name_embedding, metadata: metadata || {} });
 
-    return { id, name, type, status: "Entity created" };
+    const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
+    return { id, name, type, created_at: now, created_at_iso, status: "Entity created" };
   }
 
   private async initUserProfile() {
@@ -1294,9 +1295,12 @@ export class MemoryServer {
       const suggestionsRaw = await this.inferenceEngine.inferRelations(entityId);
       const suggestions = await this.formatInferredRelationsForContext(suggestionsRaw);
 
+      const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
       return { 
         id, 
-        entity_id: entityId, 
+        entity_id: entityId,
+        created_at: now,
+        created_at_iso,
         status: "Observation saved", 
         inferred_suggestions: suggestions 
       };
@@ -1358,7 +1362,15 @@ export class MemoryServer {
       metadata: args.metadata || {}
     });
 
-    return { status: "Relationship created" };
+    const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
+    return { 
+      from_id: args.from_id,
+      to_id: args.to_id,
+      relation_type: args.relation_type,
+      created_at: now,
+      created_at_iso,
+      status: "Relationship created" 
+    };
   }
 
   public async exploreGraph(args: { start_entity: string; end_entity?: string; max_hops?: number; relation_types?: string[] }) {

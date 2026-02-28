@@ -80,6 +80,10 @@ npm run start
 
 📦 **Export/Import (seit v1.8)** - Export nach JSON, Markdown oder Obsidian-ready ZIP; Import von Mem0, MemGPT, Markdown oder nativem Format
 
+📄 **PDF-Unterstützung (seit v1.9)** - Direkte PDF-Ingestion mit Textextraktion via pdfjs-dist; unterstützt Dateipfad und Content-Parameter
+
+🕐 **Duales Zeitstempel-Format (seit v1.9)** - Alle Zeitstempel werden sowohl als Unix-Mikrosekunden als auch im ISO 8601 Format zurückgegeben
+
 ### Detaillierte Features
 
 Dieses Repository enthält:
@@ -729,6 +733,24 @@ Beispiel:
 Liefert Löschstatistiken, die genau zeigen, was entfernt wurde.
 
 ## Technische Highlights
+
+### Duales Zeitstempel-Format (v1.9)
+
+Alle Schreiboperationen (`create_entity`, `add_observation`, `create_relation`) geben Zeitstempel in beiden Formaten zurück:
+- `created_at`: Unix-Mikrosekunden (natives CozoDB-Format, präzise für Berechnungen)
+- `created_at_iso`: ISO 8601 String (menschenlesbar, z.B. `"2026-02-28T17:21:19.343Z"`)
+
+Dieses duale Format bietet maximale Flexibilität - verwende Unix-Zeitstempel für Zeitberechnungen und Vergleiche, oder ISO-Strings für Anzeige und Logging.
+
+Beispiel-Antwort:
+```json
+{
+  "id": "...",
+  "created_at": 1772299279343000,
+  "created_at_iso": "2026-02-28T17:21:19.343Z",
+  "status": "Entity created"
+}
+```
 
 ### Local ONNX Embeddings (Transformers)
 

@@ -83,6 +83,10 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 📦 **Export/Import (since v1.8)** - Export to JSON, Markdown, or Obsidian-ready ZIP; import from Mem0, MemGPT, Markdown, or native format
 
+📄 **PDF Support (since v1.9)** - Direct PDF ingestion with text extraction via pdfjs-dist; supports file path and content parameters
+
+🕐 **Dual Timestamp Format (since v1.9)** - All timestamps returned in both Unix microseconds and ISO 8601 format for maximum flexibility
+
 ### Detailed Features
 - **Hybrid Search (v0.7 Optimized)**: Combination of semantic search (HNSW), **Full-Text Search (FTS)**, and graph signals, merged via Reciprocal Rank Fusion (RRF).
 - **Full-Text Search (FTS)**: Native CozoDB v0.7 FTS indices with stemming, stopword filtering, and robust query sanitizing (cleaning of `+ - * / \ ( ) ? .`) for maximum stability.
@@ -330,6 +334,67 @@ npm run start
 ```
 
 Default database path: `memory_db.cozo.db` in project root (created automatically).
+
+### CLI Tool
+
+CozoDB Memory includes a full-featured CLI for all operations:
+
+```bash
+# System operations
+cozo-memory system health
+cozo-memory system metrics
+
+# Entity operations
+cozo-memory entity create -n "MyEntity" -t "person" -m '{"age": 30}'
+cozo-memory entity get -i <entity-id>
+cozo-memory entity delete -i <entity-id>
+
+# Observations
+cozo-memory observation add -i <entity-id> -t "Some note"
+
+# Relations
+cozo-memory relation create --from <id1> --to <id2> --type "knows" -s 0.8
+
+# Search
+cozo-memory search query -q "search term" -l 10
+cozo-memory search context -q "context query"
+
+# Graph operations
+cozo-memory graph explore -s <entity-id> -h 3
+cozo-memory graph pagerank
+cozo-memory graph communities
+
+# Export/Import
+cozo-memory export json -o backup.json --include-metadata --include-relationships --include-observations
+cozo-memory export markdown -o notes.md
+cozo-memory export obsidian -o vault.zip
+cozo-memory import file -i data.json -f cozo
+
+# All commands support -f json or -f pretty for output formatting
+```
+
+### TUI (Terminal User Interface)
+
+Interactive TUI with mouse support powered by Python Textual:
+
+```bash
+# Install Python dependencies (one-time)
+pip install textual
+
+# Launch TUI
+npm run tui
+# or directly:
+cozo-memory-tui
+```
+
+**TUI Features:**
+- 🖱️ Full mouse support (click buttons, scroll, select inputs)
+- ⌨️ Keyboard shortcuts (q=quit, h=help, r=refresh)
+- 📊 Interactive menus for all operations
+- 🎨 Rich terminal UI with colors and animations
+- 📋 Real-time results display
+- 🔍 Forms for entity creation, search, graph operations
+- 📤 Export/Import wizards
 
 ### Claude Desktop Integration
 
@@ -745,6 +810,24 @@ Example:
 Returns deletion statistics showing exactly what was removed.
 
 ## Technical Highlights
+
+### Dual Timestamp Format (v1.9)
+
+All write operations (`create_entity`, `add_observation`, `create_relation`) return timestamps in both formats:
+- `created_at`: Unix microseconds (CozoDB native format, precise for calculations)
+- `created_at_iso`: ISO 8601 string (human-readable, e.g., `"2026-02-28T17:21:19.343Z"`)
+
+This dual format provides maximum flexibility - use Unix timestamps for time calculations and comparisons, or ISO strings for display and logging.
+
+Example response:
+```json
+{
+  "id": "...",
+  "created_at": 1772299279343000,
+  "created_at_iso": "2026-02-28T17:21:19.343Z",
+  "status": "Entity created"
+}
+```
 
 ### Local ONNX Embeddings (Transformers)
 

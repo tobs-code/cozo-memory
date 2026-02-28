@@ -87,7 +87,7 @@ export class EmbeddingService {
     
     this.dimensions = dimensionMap[this.modelId] || 1024;
     
-    console.log(`[EmbeddingService] Using model: ${this.modelId} (${this.dimensions} dimensions)`);
+    console.error(`[EmbeddingService] Using model: ${this.modelId} (${this.dimensions} dimensions)`);
   }
 
   // Public getter for dimensions

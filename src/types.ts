@@ -1,5 +1,10 @@
 // Core types for CozoDB Memory MCP Server
 
+export interface DualTimestamp {
+  timestamp: number;      // Unix microseconds (CozoDB format)
+  iso: string;           // ISO 8601 string (human-readable)
+}
+
 export interface Entity {
   id: string;
   name: string;
@@ -8,6 +13,7 @@ export interface Entity {
   name_embedding: number[];
   metadata: Record<string, any>;
   created_at: number;
+  created_at_iso?: string;  // Optional ISO format for backward compatibility
 }
 
 export interface Observation {
@@ -17,6 +23,7 @@ export interface Observation {
   embedding: number[];
   metadata: Record<string, any>;
   created_at: number;
+  created_at_iso?: string;  // Optional ISO format for backward compatibility
 }
 
 export interface Relationship {
@@ -26,6 +33,7 @@ export interface Relationship {
   strength: number;
   metadata: Record<string, any>;
   created_at: number;
+  created_at_iso?: string;  // Optional ISO format for backward compatibility
 }
 
 export interface SearchResult {

@@ -267,7 +267,7 @@ export interface HybridSearchOptions {
     console.error('--- DEBUG: Cozo Datalog Query ---');
     console.error(datalogQuery);
     console.error('--- DEBUG: Params ---');
-    console.dir(params, { depth: null });
+    console.error(JSON.stringify(params, null, 2));
 
     try {
       const results = await this.db.run(datalogQuery, params);
@@ -322,8 +322,13 @@ export interface HybridSearchOptions {
     // @ts-ignore
     const { topk = 5, efSearch = 50 } = vectorParams || {};
  
-     // Fallback Mock
-     return [];
+     // Use advancedSearch as the default implementation
+     return this.advancedSearch({
+       ...options,
+       vectorParams: {
+         efSearch: 100
+       }
+     });
    }
  
    async graphRag(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {

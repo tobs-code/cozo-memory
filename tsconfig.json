@@ -3,6 +3,7 @@
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "jsx": "react",
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
