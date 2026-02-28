@@ -6,6 +6,8 @@ import { CozoDb } from "cozo-node";
 import { z } from "zod";
 import { v4 as uuidv4, validate as uuidValidate } from "uuid";
 import path from "path";
+import fs from "fs";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { HybridSearch } from "./hybrid-search";
 import { InferenceEngine } from "./inference-engine";
 
@@ -1870,9 +1872,10 @@ ids[id] <- $ids
     entity_id?: string;
     entity_name?: string;
     entity_type?: string;
-    format: "markdown" | "json";
+    format: "markdown" | "json" | "pdf";
     chunking?: "none" | "paragraphs";
-    content: string;
+    file_path?: string;
+    content?: string;
     metadata?: any;
     observation_metadata?: any;
     deduplicate?: boolean;
@@ -1880,7 +1883,40 @@ ids[id] <- $ids
   }) {
     await this.initPromise;
     try {
-      const content = (args.content ?? "").trim();
+      // Check that either file_path or content is provided
+      if (!args.file_path && !args.content) {
+        return { error: "Either file_path or content must be provided" };
+      }
+      
+      // Read content from file if file_path is provided
+      let content: string;
+      if (args.file_path) {
+        try {
+          if (args.format === "pdf") {
+            // Read PDF file and extract text using pdfjs-dist
+            const data = new Uint8Array(fs.readFileSync(args.file_path));
+            const loadingTask = getDocument({ data });
+            const pdf = await loadingTask.promise;
+            const numPages = pdf.numPages;
+            
+            const pageTextPromises = Array.from({ length: numPages }, async (_, i) => {
+              const page = await pdf.getPage(i + 1);
+              const textContent = await page.getTextContent();
+              return textContent.items.map((item: any) => item.str).join(' ');
+            });
+            
+            const pageTexts = await Promise.all(pageTextPromises);
+            content = pageTexts.join('\n').trim();
+          } else {
+            content = fs.readFileSync(args.file_path, 'utf-8').trim();
+          }
+        } catch (error: any) {
+          return { error: `Failed to read file: ${error.message}` };
+        }
+      } else {
+        content = (args.content ?? "").trim();
+      }
+      
       if (!content) return { error: "Content must not be empty" };
 
       let entityId: string | undefined = undefined;
@@ -1916,7 +1952,7 @@ ids[id] <- $ids
 
       const observations: Array<{ text: string; metadata?: any }> = [];
 
-      if (args.format === "markdown") {
+      if (args.format === "markdown" || args.format === "pdf") {
         if (chunking === "paragraphs") {
           const parts = content
             .split(/\r?\n\s*\r?\n+/g)
@@ -2511,9 +2547,10 @@ ids[id] <- $ids
         entity_id: z.string().optional().describe("ID of the target entity"),
         entity_name: z.string().optional().describe("Name of the target entity (will be created if not exists)"),
         entity_type: z.string().optional().default("Document").describe("Type of the target entity (only when creating)"),
-        format: z.enum(["markdown", "json"]).describe("Input format"),
+        format: z.enum(["markdown", "json", "pdf"]).describe("Input format"),
         chunking: z.enum(["none", "paragraphs"]).optional().default("none").describe("Chunking for Markdown"),
-        content: z.string().describe("File content (or LLM summary)"),
+        file_path: z.string().optional().describe("Path to file on disk (alternative to content parameter)"),
+        content: z.string().optional().describe("File content (or LLM summary) - required if file_path not provided"),
         metadata: MetadataSchema.optional().describe("Metadata for entity creation"),
         observation_metadata: MetadataSchema.optional().describe("Metadata applied to all observations"),
         deduplicate: z.boolean().optional().default(true).describe("Skip exact duplicates"),
@@ -2521,6 +2558,9 @@ ids[id] <- $ids
       }).refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
         message: "entity_id or entity_name is required for ingest_file",
         path: ["entity_id"],
+      }).refine((v) => Boolean((v as any).file_path) || Boolean((v as any).content), {
+        message: "file_path or content is required for ingest_file",
+        path: ["file_path"],
       }),
     ]);
 
@@ -2536,9 +2576,10 @@ ids[id] <- $ids
       entity_type: z.string().optional().describe("Only when entity_name is used and entity is created new"),
       text: z.string().optional().describe("For add_observation (required)"),
       datalog: z.string().optional().describe("For add_inference_rule (required)"),
-      format: z.enum(["markdown", "json"]).optional().describe("For ingest_file (required)"),
+      format: z.enum(["markdown", "json", "pdf"]).optional().describe("For ingest_file (required)"),
       chunking: z.enum(["none", "paragraphs"]).optional().describe("Optional for ingest_file (for markdown)"),
-      content: z.string().optional().describe("For ingest_file (required)"),
+      file_path: z.string().optional().describe("For ingest_file - path to file on disk (alternative to content)"),
+      content: z.string().optional().describe("For ingest_file - file content (required if file_path not provided)"),
       observation_metadata: MetadataSchema.optional().describe("Optional for ingest_file"),
       deduplicate: z.boolean().optional().describe("Optional for ingest_file and add_observation"),
       max_observations: z.number().optional().describe("Optional for ingest_file"),

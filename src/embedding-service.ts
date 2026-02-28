@@ -1,4 +1,4 @@
-
+import 'dotenv/config'; // Load .env file first
 import { AutoTokenizer, env } from "@xenova/transformers";
 const ort = require('onnxruntime-node');
 import * as path from 'path';
@@ -81,6 +81,8 @@ export class EmbeddingService {
       "Xenova/bge-m3": 1024,
       "Xenova/all-MiniLM-L6-v2": 384,
       "Xenova/bge-small-en-v1.5": 384,
+      "Xenova/nomic-embed-text-v1": 768,
+      "onnx-community/Qwen3-Embedding-0.6B-ONNX": 1024,
     };
     
     this.dimensions = dimensionMap[this.modelId] || 1024;
@@ -106,27 +108,47 @@ export class EmbeddingService {
     if (this.session && this.tokenizer) return;
 
     try {
-      // 1. Load Tokenizer
+      // 1. Check if model needs to be downloaded
+      // Extract namespace and model name from modelId (e.g., "Xenova/bge-m3" or "onnx-community/Qwen3-Embedding-0.6B-ONNX")
+      const parts = this.modelId.split('/');
+      const namespace = parts[0];
+      const modelName = parts[1];
+      
+      // Try both possible cache locations
+      let baseDir = path.join(env.cacheDir, namespace, modelName, 'onnx');
+      let fp32Path = path.join(baseDir, 'model.onnx');
+      let quantizedPath = path.join(baseDir, 'model_quantized.onnx');
+      
+      // If ONNX model files don't exist, download them
+      if (!fs.existsSync(fp32Path) && !fs.existsSync(quantizedPath)) {
+        console.log(`[EmbeddingService] Model not found, downloading ${this.modelId}...`);
+        console.log(`[EmbeddingService] This may take a few minutes on first run.`);
+        
+        // Import AutoModel dynamically to trigger download
+        const { AutoModel } = await import("@xenova/transformers");
+        await AutoModel.from_pretrained(this.modelId, { quantized: false });
+        
+        console.log(`[EmbeddingService] Model download completed.`);
+      }
+
+      // 2. Load Tokenizer
       if (!this.tokenizer) {
           this.tokenizer = await AutoTokenizer.from_pretrained(this.modelId);
       }
 
-      // 2. Determine model path
-      const modelName = this.modelId.split('/')[1]; // Extract model name from "Xenova/model-name"
-      const baseDir = path.join(env.cacheDir, 'Xenova', modelName, 'onnx');
-      
+      // 3. Determine model path
       // Priority: FP32 (model.onnx) > Quantized (model_quantized.onnx)
-      let modelPath = path.join(baseDir, 'model.onnx');
+      let modelPath = fp32Path;
       
       if (!fs.existsSync(modelPath)) {
-        modelPath = path.join(baseDir, 'model_quantized.onnx');
+        modelPath = quantizedPath;
       }
 
       if (!fs.existsSync(modelPath)) {
-        throw new Error(`Model file not found at: ${modelPath}`);
+        throw new Error(`Model file not found at: ${modelPath}. Download may have failed.`);
       }
 
-      // 3. Create Session
+      // 4. Create Session
       if (!this.session) {
           const options: any = {
             executionProviders: ['cpu'], // Use CPU backend to avoid native conflicts
@@ -144,7 +166,16 @@ export class EmbeddingService {
 
   async embed(text: any): Promise<number[]> {
     return this.runSerialized(async () => {
-      const textStr = String(text || "");
+      let textStr = String(text || "");
+      
+      // For Qwen3-Embedding models, add instruction prefix for better results
+      // (only for queries, not for documents being indexed)
+      if (this.modelId.includes('Qwen3-Embedding')) {
+        // Add instruction prefix if not already present
+        if (!textStr.startsWith('Instruct:')) {
+          textStr = `Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ${textStr}`;
+        }
+      }
       
       // 1. Cache lookup
       const cached = this.cache.get(textStr);
@@ -184,7 +215,6 @@ export class EmbeddingService {
         
         // 5. Pooling & Normalization
         // Output name usually 'last_hidden_state' or 'logits'
-        // For BGE-M3, the first output is usually the hidden states [batch, seq_len, hidden_size]
         const outputName = this.session.outputNames[0]; 
         const outputTensor = results[outputName];
         
@@ -193,11 +223,23 @@ export class EmbeddingService {
             throw new Error("No output data or attention mask available");
         }
 
-        const embedding = this.meanPooling(
+        // Choose pooling strategy based on model
+        let embedding: number[];
+        if (this.modelId.includes('Qwen3-Embedding')) {
+          // Qwen3-Embedding uses last token pooling
+          embedding = this.lastTokenPooling(
+            outputTensor.data as Float32Array,
+            attentionMaskData,
+            outputTensor.dims
+          );
+        } else {
+          // BGE and other models use mean pooling
+          embedding = this.meanPooling(
             outputTensor.data as Float32Array, 
             attentionMaskData, 
             outputTensor.dims
-        );
+          );
+        }
         
         // Normalize
         const normalized = this.normalize(embedding);
@@ -221,6 +263,29 @@ export class EmbeddingService {
           results.push(await this.embed(text));
       }
       return results;
+  }
+
+  private lastTokenPooling(data: Float32Array, attentionMask: BigInt64Array, dims: readonly number[]): number[] {
+    // dims: [batch_size, seq_len, hidden_size]
+    // Extract the last valid token's hidden state
+    const [batchSize, seqLen, hiddenSize] = dims;
+    
+    // Find last valid token position
+    let lastValidIdx = seqLen - 1;
+    for (let i = seqLen - 1; i >= 0; i--) {
+      if (attentionMask[i] === 1n) {
+        lastValidIdx = i;
+        break;
+      }
+    }
+    
+    // Extract embedding at last valid position
+    const embedding = new Float32Array(hiddenSize);
+    for (let j = 0; j < hiddenSize; j++) {
+      embedding[j] = data[lastValidIdx * hiddenSize + j];
+    }
+    
+    return Array.from(embedding);
   }
 
   private meanPooling(data: Float32Array, attentionMask: BigInt64Array, dims: readonly number[]): number[] {

@@ -2,6 +2,8 @@ import { DatabaseService } from './db-service.js';
 import { EmbeddingService } from './embedding-service.js';
 import { Entity, Observation, Relationship, SearchResult } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import * as fs from 'fs';
 
 export class MemoryService {
   private db: DatabaseService;
@@ -230,10 +232,11 @@ export class MemoryService {
 
   async ingestFile(
     content: string,
-    format: 'markdown' | 'json',
+    format: 'markdown' | 'json' | 'pdf',
     entityName: string,
     entityType: string = 'Document',
-    chunking: 'none' | 'paragraphs' = 'paragraphs'
+    chunking: 'none' | 'paragraphs' = 'paragraphs',
+    filePath?: string
   ): Promise<any> {
     const searchResults = await this.search(entityName, 1);
     let entity: Entity;
@@ -246,14 +249,64 @@ export class MemoryService {
 
     let chunks: string[] = [];
     
-    if (format === 'markdown' && chunking === 'paragraphs') {
-      chunks = content.split(/\n\s*\n/).filter((c: string) => c.trim().length > 0);
-    } else if (format === 'json') {
+    if (format === 'pdf') {
       try {
-        const data = JSON.parse(content);
+        let data: Uint8Array;
+        
+        // If filePath is provided, read from file
+        if (filePath) {
+          data = new Uint8Array(fs.readFileSync(filePath));
+        } else {
+          // Otherwise, assume content is base64
+          const buffer = Buffer.from(content, 'base64');
+          data = new Uint8Array(buffer);
+        }
+        
+        const loadingTask = getDocument({ data });
+        const pdf = await loadingTask.promise;
+        const numPages = pdf.numPages;
+        
+        const pageTextPromises = Array.from({ length: numPages }, async (_, i) => {
+          const page = await pdf.getPage(i + 1);
+          const textContent = await page.getTextContent();
+          return textContent.items.map((item: any) => item.str).join(' ');
+        });
+        
+        const pageTexts = await Promise.all(pageTextPromises);
+        const text = pageTexts.join('\n');
+        
+        if (chunking === 'paragraphs') {
+          chunks = text.split(/\n\s*\n/).filter((c: string) => c.trim().length > 0);
+        } else {
+          chunks = [text];
+        }
+      } catch (e) {
+        console.error('[MemoryService] PDF parsing error:', e);
+        throw new Error(`Failed to parse PDF: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else if (format === 'markdown') {
+      // For markdown, also support file path
+      let textContent = content;
+      if (filePath) {
+        textContent = fs.readFileSync(filePath, 'utf-8');
+      }
+      
+      if (chunking === 'paragraphs') {
+        chunks = textContent.split(/\n\s*\n/).filter((c: string) => c.trim().length > 0);
+      } else {
+        chunks = [textContent];
+      }
+    } else if (format === 'json') {
+      let textContent = content;
+      if (filePath) {
+        textContent = fs.readFileSync(filePath, 'utf-8');
+      }
+      
+      try {
+        const data = JSON.parse(textContent);
         chunks = [JSON.stringify(data, null, 2)];
       } catch (e) {
-        chunks = [content];
+        chunks = [textContent];
       }
     } else {
       chunks = [content];

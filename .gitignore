@@ -60,3 +60,4 @@ package-lock.json
 powers/
 .blackboxrules
 Low-Hanging-Fruit.md
+EMBEDDING_MODEL_*.*

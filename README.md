@@ -273,13 +273,21 @@ CozoDB Memory supports multiple embedding models via the `EMBEDDING_MODEL` envir
 | `Xenova/all-MiniLM-L6-v2` | ~80 MB | ~400 MB | 384 | Low-spec machines, development |
 | `Xenova/bge-small-en-v1.5` | ~130 MB | ~600 MB | 384 | Balanced performance |
 
-**Usage:**
+**Configuration Options:**
+
+**Option 1: Using `.env` file (Easiest for beginners)**
 
 ```bash
-# Use lightweight model for development
-EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run start
+# Copy the example file
+cp .env.example .env
 
-# Or set in Claude Desktop config
+# Edit .env and set your preferred model
+EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2
+```
+
+**Option 2: MCP Server Config (For Claude Desktop / Kiro)**
+
+```json
 {
   "mcpServers": {
     "cozo-memory": {
@@ -290,6 +298,22 @@ EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run start
       }
     }
   }
+}
+```
+
+**Option 3: Command Line**
+
+```bash
+# Use lightweight model for development
+EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run start
+```
+
+**Download Model First (Recommended):**
+
+```bash
+# Set model in .env or via command line, then:
+EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run download-model
+```
 }
 ```
 
@@ -413,7 +437,10 @@ Actions:
 - `create_relation`: `{ from_id, to_id, relation_type, strength?, metadata? }`
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(New v1.2)**: Executes multiple operations atomically.
 - `add_inference_rule`: `{ name, datalog }`
-- `ingest_file`: `{ format, content, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+- `ingest_file`: `{ format, file_path?, content?, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+  - `format` options: `"markdown"`, `"json"`, `"pdf"` **(New v1.9)**
+  - `file_path`: Optional path to file on disk (alternative to `content` parameter)
+  - `content`: File content as string (required if `file_path` not provided)
   - `chunking` options: `"none"`, `"paragraphs"` (future: `"semantic"`)
 
 Important Details:
@@ -465,7 +492,7 @@ Example (Transitive Manager ⇒ Upper Manager):
 }
 ```
 
-Bulk Ingestion (Markdown/JSON):
+Bulk Ingestion (Markdown/JSON/PDF):
 
 ```json
 {
@@ -476,6 +503,19 @@ Bulk Ingestion (Markdown/JSON):
   "content": "# Title\n\nSection 1...\n\nSection 2...",
   "deduplicate": true,
   "max_observations": 50
+}
+```
+
+PDF Ingestion via File Path:
+
+```json
+{
+  "action": "ingest_file",
+  "entity_name": "Research Paper",
+  "format": "pdf",
+  "file_path": "/path/to/document.pdf",
+  "chunking": "paragraphs",
+  "deduplicate": true
 }
 ```
 

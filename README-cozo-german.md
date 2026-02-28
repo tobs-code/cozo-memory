@@ -333,7 +333,10 @@ Aktionen:
 - `create_relation`: `{ from_id, to_id, relation_type, strength?, metadata? }`
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(Neu v1.2)**: Führt mehrere Operationen atomar aus.
 - `add_inference_rule`: `{ name, datalog }`
-- `ingest_file`: `{ format, content, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+- `ingest_file`: `{ format, file_path?, content?, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+  - `format` Optionen: `"markdown"`, `"json"`, `"pdf"` **(Neu v1.9)**
+  - `file_path`: Optionaler Pfad zur Datei auf der Festplatte (Alternative zum `content` Parameter)
+  - `content`: Dateiinhalt als String (erforderlich wenn `file_path` nicht angegeben)
   - `chunking` Optionen: `"none"`, `"paragraphs"` (zukünftig: `"semantic"`)
 
 Wichtige Details:
@@ -405,7 +408,7 @@ Regeln testen (liefert Vorschläge, persistiert sie aber nicht automatisch):
 { "action": "infer_relations", "entity_id": "ENTITY_ID" }
 ```
 
-Bulk-Ingestion (Markdown/JSON):
+Bulk-Ingestion (Markdown/JSON/PDF):
 
 ```json
 {
@@ -416,6 +419,19 @@ Bulk-Ingestion (Markdown/JSON):
   "content": "# Titel\n\nAbschnitt 1...\n\nAbschnitt 2...",
   "deduplicate": true,
   "max_observations": 50
+}
+```
+
+PDF-Ingestion über Dateipfad:
+
+```json
+{
+  "action": "ingest_file",
+  "entity_name": "Forschungsarbeit",
+  "format": "pdf",
+  "file_path": "/pfad/zur/dokument.pdf",
+  "chunking": "paragraphs",
+  "deduplicate": true
 }
 ```
 

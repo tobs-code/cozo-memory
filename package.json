@@ -1,6 +1,6 @@
 {
   "name": "cozo-memory",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "mcpName": "io.github.tobs-code/cozo-memory",
   "description": "Local-first persistent memory system for AI agents with hybrid search, graph reasoning, and MCP integration",
   "main": "dist/index.js",
@@ -55,10 +55,12 @@
     "archiver": "^7.0.1",
     "cors": "^2.8.6",
     "cozo-node": "^0.7.6",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "fastmcp": "^3.31.0",
     "ollama": "^0.6.3",
     "onnxruntime-node": "^1.24.2",
+    "pdfjs-dist": "^5.4.624",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },

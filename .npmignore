@@ -32,3 +32,4 @@ mcp_config.json
 mcp_config.example.json
 nginx.conf
 Low-Hanging-Fruit.md
+EMBEDDING_MODEL_*.*
