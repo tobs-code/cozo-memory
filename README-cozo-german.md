@@ -835,6 +835,42 @@ Das System pflegt ein persistentes Profil über den Benutzer (Vorlieben, Abneigu
 - **Funktionsweise**: Alle Beobachtungen, die dieser Entität zugeordnet werden, erhalten bei Such- und Kontext-Anfragen einen signifikanten Boost.
 - **Initialisierung**: Das Profil wird beim ersten Start automatisch angelegt.
 
+### Manuelle Profil-Bearbeitung
+
+Du kannst das User-Profil jetzt direkt mit dem `edit_user_profile` MCP-Tool bearbeiten:
+
+```typescript
+// Aktuelles Profil anzeigen
+{ }
+
+// Metadata aktualisieren
+{ 
+  metadata: { timezone: "Europe/Berlin", language: "de" } 
+}
+
+// Präferenzen hinzufügen
+{ 
+  observations: [
+    { text: "Bevorzugt TypeScript gegenüber JavaScript" },
+    { text: "Mag prägnante Dokumentation" }
+  ]
+}
+
+// Präferenzen zurücksetzen
+{ 
+  clear_observations: true,
+  observations: [{ text: "Neue Präferenz" }]
+}
+
+// Name und Typ aktualisieren
+{ 
+  name: "Entwickler-Profil", 
+  type: "UserProfile" 
+}
+```
+
+**Hinweis**: Du kannst weiterhin die implizite Methode über `mutate_memory` mit `action='add_observation'` und `entity_id='global_user_profile'` verwenden.
+
 ### Manuelle Tests
 
 Es gibt verschiedene Test-Skripte für unterschiedliche Features:
@@ -851,6 +887,9 @@ npx ts-node test-reflection.ts
 
 # Testet das User Preference Profiling und den Search-Boost
 npx ts-node test-user-pref.ts
+
+# Testet die manuelle User-Profil-Bearbeitung
+npx ts-node src/test-user-profile.ts
 ```
 
 ## Troubleshooting

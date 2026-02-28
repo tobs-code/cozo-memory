@@ -104,6 +104,7 @@ class CozoMemoryTUI(App):
             with Vertical(id="sidebar"):
                 yield Static("🧠 CozoDB Memory", classes="info")
                 yield Button("📊 System Health", id="btn-health", variant="primary")
+                yield Button("👤 User Profile", id="btn-profile")
                 yield Button("➕ Create Entity", id="btn-create-entity")
                 yield Button("🔍 Search", id="btn-search")
                 yield Button("🕸️ Graph Operations", id="btn-graph")
@@ -291,6 +292,21 @@ class CozoMemoryTUI(App):
         else:
             await container.mount(Static(f"Error: {result.get('error', 'Unknown error')}"))
     
+    async def action_profile_menu(self) -> None:
+        """Show user profile menu"""
+        self.query_one("#welcome-text", Static).update("👤 User Profile")
+        
+        container = self.query_one("#result-container", Container)
+        await container.remove_children()
+        
+        await container.mount(
+            Static("User Profile Management:", classes="info"),
+            Button("📋 Show Profile", id="btn-profile-show"),
+            Button("✏️ Update Metadata", id="btn-profile-update"),
+            Button("➕ Add Preference", id="btn-profile-add-pref"),
+            Button("🔄 Reset Preferences", id="btn-profile-reset")
+        )
+    
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle all button presses"""
         button_id = event.button.id
@@ -298,6 +314,8 @@ class CozoMemoryTUI(App):
         # Main menu buttons
         if button_id == "btn-health":
             await self.action_show_health()
+        elif button_id == "btn-profile":
+            await self.action_profile_menu()
         elif button_id == "btn-create-entity":
             await self.action_create_entity()
         elif button_id == "btn-search":
@@ -311,11 +329,25 @@ class CozoMemoryTUI(App):
         elif button_id == "btn-list":
             await self.action_list_entities()
         
+        # Profile submenu buttons
+        elif button_id == "btn-profile-show":
+            await self.handle_profile_show()
+        elif button_id == "btn-profile-update":
+            await self.action_profile_update_form()
+        elif button_id == "btn-profile-add-pref":
+            await self.action_profile_add_pref_form()
+        elif button_id == "btn-profile-reset":
+            await self.handle_profile_reset()
+        
         # Form submission buttons
         elif button_id == "btn-submit-entity":
             await self.handle_create_entity()
         elif button_id == "btn-submit-search":
             await self.handle_search()
+        elif button_id == "btn-submit-profile-update":
+            await self.handle_profile_update()
+        elif button_id == "btn-submit-profile-pref":
+            await self.handle_profile_add_pref()
         elif button_id == "btn-submit-import":
             await self.handle_import()
         
@@ -474,6 +506,87 @@ All operations can also be done via CLI:
         """Refresh current view"""
         self.query_one("#welcome-text", Static).update("🔄 Refreshed")
         self.action_show_health()
+    
+    async def handle_profile_show(self) -> None:
+        """Show user profile"""
+        result = self._run_cli_command("profile", "show")
+        self._update_result(result)
+    
+    async def action_profile_update_form(self) -> None:
+        """Show profile update form"""
+        self.query_one("#welcome-text", Static).update("✏️ Update Profile Metadata")
+        
+        container = self.query_one("#result-container", Container)
+        await container.remove_children()
+        
+        await container.mount(
+            Label("Profile Name (optional):"),
+            Input(placeholder="Developer Profile", id="input-profile-name"),
+            Label("Profile Type (optional):"),
+            Input(placeholder="UserProfile", id="input-profile-type"),
+            Label("Metadata (JSON, optional):"),
+            Input(placeholder='{"timezone": "Europe/Berlin"}', id="input-profile-metadata"),
+            Button("Update", id="btn-submit-profile-update", variant="success")
+        )
+    
+    async def action_profile_add_pref_form(self) -> None:
+        """Show add preference form"""
+        self.query_one("#welcome-text", Static).update("➕ Add Preference")
+        
+        container = self.query_one("#result-container", Container)
+        await container.remove_children()
+        
+        await container.mount(
+            Label("Preference Text:"),
+            Input(placeholder="I prefer TypeScript over JavaScript", id="input-pref-text"),
+            Label("Metadata (JSON, optional):"),
+            Input(placeholder='{"category": "tech_stack"}', id="input-pref-metadata"),
+            Button("Add Preference", id="btn-submit-profile-pref", variant="success")
+        )
+    
+    async def handle_profile_update(self) -> None:
+        """Handle profile update"""
+        name_input = self.query_one("#input-profile-name", Input)
+        type_input = self.query_one("#input-profile-type", Input)
+        metadata_input = self.query_one("#input-profile-metadata", Input)
+        
+        args = ["profile", "update"]
+        
+        if name_input.value:
+            args.extend(["-n", name_input.value])
+        if type_input.value:
+            args.extend(["-t", type_input.value])
+        if metadata_input.value:
+            args.extend(["-m", metadata_input.value])
+        
+        if len(args) == 2:
+            self._update_result({"error": "At least one field must be provided"})
+            return
+        
+        result = self._run_cli_command(*args)
+        self._update_result(result)
+    
+    async def handle_profile_add_pref(self) -> None:
+        """Handle add preference"""
+        text_input = self.query_one("#input-pref-text", Input)
+        metadata_input = self.query_one("#input-pref-metadata", Input)
+        
+        if not text_input.value:
+            self._update_result({"error": "Preference text is required"})
+            return
+        
+        args = ["profile", "add-preference", "-t", text_input.value]
+        
+        if metadata_input.value:
+            args.extend(["-m", metadata_input.value])
+        
+        result = self._run_cli_command(*args)
+        self._update_result(result)
+    
+    async def handle_profile_reset(self) -> None:
+        """Handle profile reset"""
+        result = self._run_cli_command("profile", "reset")
+        self._update_result(result)
 
 
 if __name__ == "__main__":

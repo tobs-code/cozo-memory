@@ -2454,6 +2454,94 @@ ids[id] <- $ids
     });
   }
 
+  public async editUserProfile(args: { 
+    name?: string; 
+    type?: string; 
+    metadata?: any;
+    observations?: Array<{ text: string; metadata?: any }>;
+    clear_observations?: boolean;
+  }) {
+    try {
+      const current = await this.db.run(
+        '?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}', 
+        { id: USER_ENTITY_ID }
+      );
+      
+      if (current.rows.length === 0) {
+        return { error: "User profile not found. Initialize it first." };
+      }
+
+      if (args.name || args.type || args.metadata) {
+        const updateResult = await this.updateEntity({
+          id: USER_ENTITY_ID,
+          name: args.name,
+          type: args.type,
+          metadata: args.metadata
+        });
+        
+        if (updateResult.error) {
+          return updateResult;
+        }
+      }
+
+      if (args.clear_observations) {
+        const existingObs = await this.db.run(
+          '?[id] := *observation{id, entity_id: $eid, @ "NOW"}',
+          { eid: USER_ENTITY_ID }
+        );
+        
+        for (const row of existingObs.rows) {
+          await this.db.run(
+            '?[id, entity_id, text, embedding, metadata, created_at] := *observation{id, entity_id, text, embedding, metadata, created_at, @ "NOW"}, id = $id :delete observation {id, entity_id, text, embedding, metadata, created_at}',
+            { id: row[0] }
+          );
+        }
+      }
+
+      if (args.observations && args.observations.length > 0) {
+        for (const obs of args.observations) {
+          await this.addObservation({
+            entity_id: USER_ENTITY_ID,
+            text: obs.text,
+            metadata: { ...obs.metadata, kind: "user_preference" },
+            deduplicate: true
+          });
+        }
+      }
+
+      const updated = await this.db.run(
+        '?[name, type, metadata] := *entity{id: $id, name, type, metadata, @ "NOW"}',
+        { id: USER_ENTITY_ID }
+      );
+      
+      const observations = await this.db.run(
+        '?[id, text, metadata] := *observation{id, entity_id: $eid, text, metadata, @ "NOW"}',
+        { eid: USER_ENTITY_ID }
+      );
+
+      return {
+        status: "User profile updated",
+        profile: {
+          id: USER_ENTITY_ID,
+          name: updated.rows[0][0],
+          type: updated.rows[0][1],
+          metadata: updated.rows[0][2],
+          observations: observations.rows.map((r: any) => ({
+            id: r[0],
+            text: r[1],
+            metadata: r[2]
+          }))
+        }
+      };
+    } catch (error: any) {
+      console.error("[UserProfile] Error editing user profile:", error);
+      return {
+        error: "Failed to edit user profile",
+        message: error.message || String(error)
+      };
+    }
+  }
+
   private registerTools() {
     const MetadataSchema = z.record(z.string(), z.any());
 
@@ -3769,6 +3857,43 @@ Supported actions:
 
         return JSON.stringify({ error: "Unknown action" });
       },
+    });
+
+    // User Profile Management Tool
+    this.mcp.addTool({
+      name: "edit_user_profile",
+      description: `Direct management of the global user profile ('global_user_profile').
+This tool allows manual editing of user preferences, work style, and profile metadata.
+
+The user profile is automatically boosted in all searches (50% score boost) and used for personalization.
+
+Parameters:
+- name?: string - Update the profile name (default: "The User")
+- type?: string - Update the profile type (default: "User")
+- metadata?: object - Update or merge profile metadata
+- observations?: Array<{ text: string, metadata?: object }> - Add new preference observations
+- clear_observations?: boolean - Remove all existing observations before adding new ones
+
+Examples:
+- Add preferences: { observations: [{ text: "Prefers TypeScript over JavaScript" }] }
+- Update metadata: { metadata: { timezone: "Europe/Berlin", language: "de" } }
+- Reset and set new preferences: { clear_observations: true, observations: [{ text: "New preference" }] }
+
+Note: Use 'mutate_memory' with action='add_observation' and entity_id='global_user_profile' for implicit preference updates.`,
+      parameters: z.object({
+        name: z.string().optional().describe("New name for the user profile"),
+        type: z.string().optional().describe("New type for the user profile"),
+        metadata: z.record(z.string(), z.any()).optional().describe("Metadata to merge with existing metadata"),
+        observations: z.array(z.object({
+          text: z.string().describe("Preference or work style description"),
+          metadata: z.record(z.string(), z.any()).optional().describe("Optional metadata for this observation")
+        })).optional().describe("New observations to add to the profile"),
+        clear_observations: z.boolean().optional().default(false).describe("Clear all existing observations before adding new ones")
+      }),
+      execute: async (args: any) => {
+        await this.initPromise;
+        return JSON.stringify(await this.editUserProfile(args));
+      }
     });
   }
 

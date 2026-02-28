@@ -912,6 +912,42 @@ The system maintains a persistent profile of the user (preferences, dislikes, wo
 - **Mechanism**: All observations assigned to this entity receive a significant boost in search and context queries.
 - **Initialization**: The profile is automatically created on first start.
 
+### Manual Profile Editing
+
+You can now directly edit the user profile using the `edit_user_profile` MCP tool:
+
+```typescript
+// View current profile
+{ }
+
+// Update metadata
+{ 
+  metadata: { timezone: "Europe/Berlin", language: "de" } 
+}
+
+// Add preferences
+{ 
+  observations: [
+    { text: "Prefers TypeScript over JavaScript" },
+    { text: "Likes concise documentation" }
+  ]
+}
+
+// Clear and reset preferences
+{ 
+  clear_observations: true,
+  observations: [{ text: "New preference" }]
+}
+
+// Update name and type
+{ 
+  name: "Developer Profile", 
+  type: "UserProfile" 
+}
+```
+
+**Note**: You can still use the implicit method via `mutate_memory` with `action='add_observation'` and `entity_id='global_user_profile'`.
+
 ### Manual Tests
 
 There are various test scripts for different features:
@@ -928,6 +964,9 @@ npx ts-node test-reflection.ts
 
 # Tests user preference profiling and search boost
 npx ts-node test-user-pref.ts
+
+# Tests manual user profile editing
+npx ts-node src/test-user-profile.ts
 ```
 
 ## Troubleshooting

@@ -27,6 +27,7 @@ node_modules/
 .idea/
 
 # Misc
+.repomap.tags.cache.v1/
 nul
 mcp_config.json
 mcp_config.example.json

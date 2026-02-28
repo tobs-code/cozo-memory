@@ -287,4 +287,18 @@ export class CLICommands {
     // For now, return a placeholder
     return { status: "not_implemented", message: "Use MCP server for file ingestion" };
   }
+
+  async editUserProfile(args: {
+    name?: string;
+    type?: string;
+    metadata?: any;
+    observations?: Array<{ text: string; metadata?: any }>;
+    clear_observations?: boolean;
+  }): Promise<any> {
+    return await this.server.editUserProfile(args);
+  }
+
+  async getUserProfile(): Promise<any> {
+    return await this.server.editUserProfile({});
+  }
 }

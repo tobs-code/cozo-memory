@@ -61,3 +61,4 @@ powers/
 .blackboxrules
 Low-Hanging-Fruit.md
 EMBEDDING_MODEL_*.*
+.repomap.tags.cache.v1/

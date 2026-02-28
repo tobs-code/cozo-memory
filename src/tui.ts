@@ -15,7 +15,7 @@ async function main() {
 
     const { useState, useEffect } = React;
 
-    type Screen = 'menu' | 'entity' | 'search' | 'graph' | 'system' | 'result';
+    type Screen = 'menu' | 'entity' | 'profile' | 'search' | 'graph' | 'system' | 'result';
 
     interface AppState {
       screen: Screen;
@@ -78,13 +78,13 @@ async function main() {
           } else if (key.downArrow) {
             setState(prev => ({
               ...prev,
-              selectedIndex: Math.min(5, prev.selectedIndex + 1)
+              selectedIndex: Math.min(6, prev.selectedIndex + 1)
             }));
           } else if (key.return) {
-            const screens: Screen[] = ['entity', 'search', 'graph', 'system', 'result', 'menu'];
+            const screens: Screen[] = ['entity', 'profile', 'search', 'graph', 'system', 'result', 'menu'];
             const newScreen = screens[state.selectedIndex];
             
-            if (state.selectedIndex === 4) {
+            if (state.selectedIndex === 5) {
               setState(prev => ({ ...prev, loading: true }));
               cli.health().then(result => {
                 setState(prev => ({ ...prev, screen: 'result', result, loading: false }));
@@ -115,6 +115,7 @@ async function main() {
         React.createElement(Header),
         state.screen === 'menu' && React.createElement(MainMenu, { selectedIndex: state.selectedIndex }),
         state.screen === 'entity' && React.createElement(EntityScreen),
+        state.screen === 'profile' && React.createElement(ProfileScreen),
         state.screen === 'search' && React.createElement(SearchScreen),
         state.screen === 'graph' && React.createElement(GraphScreen),
         state.screen === 'system' && React.createElement(SystemScreen),
@@ -152,6 +153,7 @@ async function main() {
     const MainMenu: React.FC<MainMenuProps> = ({ selectedIndex }) => {
       const menuItems = [
         { icon: '📦', label: 'Entity Operations', desc: 'Create, read, update, delete entities' },
+        { icon: '👤', label: 'User Profile', desc: 'Manage user preferences and profile' },
         { icon: '🔍', label: 'Search & Context', desc: 'Hybrid search, context retrieval' },
         { icon: '🕸️', label: 'Graph Operations', desc: 'Explore, PageRank, communities' },
         { icon: '⚙️', label: 'System Management', desc: 'Health, metrics, export/import' },
@@ -185,6 +187,20 @@ async function main() {
         ),
         React.createElement(Box, { marginTop: 1 },
           React.createElement(Text, { color: 'yellow' }, '💡 Use the CLI commands shown above for entity operations')
+        )
+      );
+
+    const ProfileScreen: React.FC = () =>
+      React.createElement(Box, { flexDirection: 'column' },
+        React.createElement(Text, { bold: true, color: 'cyan' }, '👤 User Profile Management'),
+        React.createElement(Box, { marginTop: 1, flexDirection: 'column', marginLeft: 2 },
+          React.createElement(Text, null, '• Show Profile: ', React.createElement(Text, { dimColor: true }, 'cozo-memory profile show')),
+          React.createElement(Text, null, '• Update Metadata: ', React.createElement(Text, { dimColor: true }, 'cozo-memory profile update -m \'{"key":"value"}\'')),
+          React.createElement(Text, null, '• Add Preference: ', React.createElement(Text, { dimColor: true }, 'cozo-memory profile add-preference -t "I prefer TypeScript"')),
+          React.createElement(Text, null, '• Reset Preferences: ', React.createElement(Text, { dimColor: true }, 'cozo-memory profile reset'))
+        ),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(Text, { color: 'yellow' }, '💡 User profile preferences get 50% search boost automatically')
         )
       );
 

@@ -409,4 +409,86 @@ ingest
     }
   });
 
+// User Profile commands
+const profile = program.command('profile').description('User profile management');
+
+profile
+  .command('show')
+  .description('Show current user profile')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.getUserProfile();
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+profile
+  .command('update')
+  .description('Update user profile metadata')
+  .option('-n, --name <name>', 'Profile name')
+  .option('-t, --type <type>', 'Profile type')
+  .option('-m, --metadata <json>', 'Metadata as JSON string')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const metadata = options.metadata ? JSON.parse(options.metadata) : undefined;
+      const result = await cli.editUserProfile({
+        name: options.name,
+        type: options.type,
+        metadata
+      });
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+profile
+  .command('add-preference')
+  .description('Add preference to user profile')
+  .requiredOption('-t, --text <text>', 'Preference text')
+  .option('-m, --metadata <json>', 'Metadata as JSON string')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const metadata = options.metadata ? JSON.parse(options.metadata) : undefined;
+      const result = await cli.editUserProfile({
+        observations: [{ text: options.text, metadata }]
+      });
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+profile
+  .command('reset')
+  .description('Clear all preferences and optionally set new ones')
+  .option('-t, --text <text>', 'New preference text (can be used multiple times)')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const observations = options.text ? [{ text: options.text }] : [];
+      const result = await cli.editUserProfile({
+        clear_observations: true,
+        observations
+      });
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 program.parse();
+
