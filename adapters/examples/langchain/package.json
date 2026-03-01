@@ -1,0 +1,22 @@
+{
+  "name": "cozo-memory-langchain-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Examples for @cozo-memory/langchain",
+  "scripts": {
+    "chatbot": "ts-node chatbot.ts",
+    "rag": "ts-node rag.ts",
+    "graph-rag": "ts-node graph-rag.ts"
+  },
+  "dependencies": {
+    "@cozo-memory/langchain": "^0.1.0",
+    "@cozo-memory/adapters-core": "^0.1.0",
+    "@langchain/openai": "^0.3.0",
+    "langchain": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.9.0"
+  }
+}

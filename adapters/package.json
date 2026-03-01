@@ -1,0 +1,25 @@
+{
+  "name": "cozo-memory-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework adapters for Cozo Memory (LangChain, LlamaIndex, CrewAI)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "clean": "npm run clean --workspaces"
+  },
+  "keywords": [
+    "cozo-memory",
+    "langchain",
+    "llamaindex",
+    "crewai",
+    "memory",
+    "ai",
+    "agents"
+  ],
+  "author": "Cozo Memory Team",
+  "license": "Apache-2.0"
+}

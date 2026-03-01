@@ -1,0 +1,27 @@
+{
+  "name": "@cozo-memory/adapters-core",
+  "version": "0.1.0",
+  "description": "Shared MCP client for Cozo Memory framework adapters",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.9.0"
+  },
+  "keywords": [
+    "cozo-memory",
+    "mcp",
+    "client"
+  ],
+  "license": "Apache-2.0"
+}
