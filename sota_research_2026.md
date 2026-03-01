@@ -125,21 +125,54 @@ class MultiHopVectorPivot {
 - Retrieval Pivot Attacks (arXiv:2602.08668): Security Patterns
 - Neo4j GraphRAG: Multi-hop Reasoning Patterns
 
-### 7. **Logical Edges from Knowledge Graph**
+### 7. **Logical Edges from Knowledge Graph** ✅ IMPLEMENTIERT (v1.0)
 
 **Idee:** Nutze KG-Relationen als "logische Edges" für komplexe Multi-Hop Queries
 
-**Für CozoDB Memory:**
-```datalog
-// Erweiterte Inference Rules mit logischen Edges
-?[from, to, relation, confidence] := 
-  *entity{id: from},
-  *entity{id: to},
-  // Logische Edge basierend auf Metadaten
-  from.metadata.category = to.metadata.category,
-  relation = "same_category",
-  confidence = 0.8
+**Status:** Vollständig implementiert mit 5 Logical Edge Patterns
+
+**Implementierung:**
+```typescript
+// src/logical-edges-service.ts
+class LogicalEdgesService {
+  // 5 Logical Edge Patterns:
+  
+  // 1. Same Category Edges (confidence: 0.8)
+  // Entities mit gleicher category in metadata
+  
+  // 2. Same Type Edges (confidence: 0.7)
+  // Entities vom gleichen type
+  
+  // 3. Hierarchical Edges (confidence: 0.9)
+  // Parent-child relationships aus metadata
+  
+  // 4. Contextual Edges (confidence: 0.7-0.75)
+  // Entities mit gleicher domain, time_period, location, organization
+  
+  // 5. Transitive Logical Edges (confidence: 0.55-0.6)
+  // Abgeleitet aus explicit relationships + metadata patterns
+  
+  async discoverLogicalEdges(entityId: string): Promise<LogicalEdge[]> {
+    // Discover all logical edges
+  }
+  
+  async materializeLogicalEdges(entityId: string): Promise<number> {
+    // Optional: Create explicit relationships for performance
+  }
+}
 ```
+
+**Features:**
+- Metadata-Driven: Entdeckt Beziehungen aus Entity-Metadaten
+- Multi-Pattern: Kombiniert 5 verschiedene logische Inference-Patterns
+- Deduplication: Entfernt automatisch Duplikate, behält höchste Confidence
+- Materialization: Optional: Erstelle explizite Relationships für Performance
+- Explainability: Jede Edge hat Reason und Pattern für Interpretierbarkeit
+
+**Research Foundation:**
+- SAGE (ICLR 2026): Implicit graph exploration with on-demand edge discovery
+- Metadata Knowledge Graphs (Atlan 2026): Metadata-driven relationship inference
+- Knowledge Graph Completion (Frontiers 2025): Predicting implicit relationships
 
 ### 8. **Context-Aware Similarity Boost**
 

@@ -61,11 +61,11 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🔀 **Dynamic Fusion Framework (v2.3)** - Advanced 4-path retrieval system combining Dense Vector, Sparse Vector, FTS, and Graph traversal with configurable weights and fusion strategies (RRF, Weighted Sum, Max, Adaptive)
 
-⏳ **Temporal Graph Neural Networks (v2.4)** - Time-aware node embeddings capturing historical context, temporal smoothness, and recency-weighted aggregation using Time2Vec encoding and multi-signal fusion
+🧠 **Logical Edges from Knowledge Graph (v1.0)** - Metadata-driven implicit relationship discovery with 5 patterns: same category, same type, hierarchical, contextual, and transitive logical edges
 
 🔀 **Multi-Hop Reasoning with Vector Pivots (v2.5)** - Logic-aware Retrieve-Reason-Prune pipeline using vector search as springboard for graph traversal with helpfulness scoring and pivot depth security
 
-🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchical retrieval with community detection and summarization; recursive traversals using optimized Datalog algorithms
+⏳ **Temporal Graph Neural Networks (v2.4)** - Time-aware node embeddings capturing historical context, temporal smoothness, and recency-weighted aggregation using Time2Vec encoding and multi-signal fusion
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
 
@@ -1159,6 +1159,51 @@ const result = await multiHop.multiHopVectorPivot(
 - **HopRAG (ACL 2025)**: Logic-aware RAG with pseudo-queries as edges, achieving 76.78% higher answer accuracy
 - **Retrieval Pivot Attacks**: Security patterns for hybrid RAG systems with boundary enforcement
 - **Neo4j GraphRAG**: Multi-hop reasoning patterns for knowledge graphs
+
+## Logical Edges from Knowledge Graph (v1.0)
+
+**Research-backed implementation** based on SAGE (ICLR 2026), Metadata Knowledge Graphs (Atlan 2026), and Knowledge Graph Completion research.
+
+### Five Logical Edge Patterns
+
+1. **Same Category Edges** - Entities with identical category metadata (confidence: 0.8)
+2. **Same Type Edges** - Entities of the same type (confidence: 0.7)
+3. **Hierarchical Edges** - Parent-child relationships from metadata (confidence: 0.9)
+4. **Contextual Edges** - Entities sharing domain, time period, location, or organization (confidence: 0.7-0.75)
+5. **Transitive Logical Edges** - Derived from explicit relationships + metadata patterns (confidence: 0.55-0.6)
+
+### Usage Example
+
+```typescript
+const logicalEdges = new LogicalEdgesService(db);
+
+// Discover all logical edges for an entity
+const edges = await logicalEdges.discoverLogicalEdges(entityId);
+
+// Optionally materialize as explicit relationships
+const created = await logicalEdges.materializeLogicalEdges(entityId);
+
+// Returns:
+// - from_id, to_id: Entity IDs
+// - relation_type: "same_category", "same_type", "hierarchical", "contextual", "transitive_logical"
+// - confidence: 0.55-0.9 based on pattern
+// - reason: Human-readable explanation
+// - pattern: Pattern type for analysis
+```
+
+### Key Features
+
+- **Metadata-Driven**: Discovers relationships from entity metadata without explicit encoding
+- **Multi-Pattern**: Combines 5 different logical inference patterns
+- **Deduplication**: Automatically removes duplicate edges, keeping highest confidence
+- **Materialization**: Optional: create explicit relationships for performance optimization
+- **Explainability**: Each edge includes reason and pattern for interpretability
+
+### Research Foundation
+
+- **SAGE (ICLR 2026)**: Implicit graph exploration with on-demand edge discovery
+- **Metadata Knowledge Graphs (Atlan 2026)**: Metadata-driven relationship inference
+- **Knowledge Graph Completion (Frontiers 2025)**: Predicting implicit relationships using embeddings
 
 ## Technical Highlights
 
