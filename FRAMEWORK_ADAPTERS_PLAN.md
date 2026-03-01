@@ -149,41 +149,34 @@ cozo-memory-llamaindex/
 
 ## Implementation Priority
 
-### Phase 1: LangChain Adapter (Week 1-2)
-**Why First:**
-- Largest user base
-- Simplest interface (just chat history)
-- Immediate value for conversational AI
+### Phase 1: LangChain Adapter ✅ (Week 1-2)
+**Status:** Complete
 
 **Deliverables:**
-- `cozo-memory-langchain` package
-- `BaseChatMessageHistory` implementation
-- Session management integration
-- Examples: chatbot, conversational RAG
-- Documentation
+- ✅ `@cozo-memory/langchain` package
+- ✅ `CozoMemoryChatHistory` implementation
+- ✅ `CozoMemoryRetriever` implementation
+- ✅ Session management integration
+- ✅ Examples: chatbot, conversational RAG, graph-RAG
+- ✅ Documentation
 
-### Phase 2: LlamaIndex Adapter (Week 3-4)
-**Why Second:**
-- Strong RAG/document focus aligns with cozo-memory strengths
-- Vector store interface well-defined
-- Graph capabilities differentiate from competitors
+### Phase 2: LlamaIndex Adapter ✅ (Week 3-4)
+**Status:** Complete
 
 **Deliverables:**
-- `cozo-memory-llamaindex` package
-- `BasePydanticVectorStore` implementation
-- Document/Index store implementations
-- Examples: RAG, knowledge graphs
-- Documentation
+- ✅ `@cozo-memory/llamaindex` package
+- ✅ `CozoVectorStore` implementation
+- ✅ Hybrid search and Graph-RAG support
+- ✅ Persistent index storage
+- ✅ Examples: basic-rag, graph-rag, persistent-index
+- ✅ Documentation
 
-### Phase 3: CrewAI Adapter (Week 5-6)
-**Why Third:**
-- Newest framework, smaller but growing user base
-- Most complex integration (memory + storage backend)
-- Benefits from learnings of Phase 1 & 2
+### Phase 3: CrewAI Adapter 📋 (Week 5-6)
+**Status:** Planned
 
 **Deliverables:**
-- `cozo-memory-crewai` package
-- `StorageBackend` implementation
+- `@cozo-memory/crewai` package
+- `CozoStorageBackend` implementation
 - Memory wrapper with scope support
 - Examples: multi-agent systems
 - Documentation

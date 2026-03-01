@@ -1,72 +1,108 @@
 # Cozo Memory Framework Adapters
 
-Official framework adapters for [Cozo Memory](https://github.com/tobs-code/cozo-memory) - enabling seamless integration with popular AI frameworks.
+Official framework adapters for Cozo Memory - enabling seamless integration with popular AI frameworks.
 
-## 📦 Packages
+## Packages
 
-### [@cozo-memory/langchain](./packages/langchain)
-LangChain adapter for persistent chat history and semantic retrieval.
+### [@cozo-memory/adapters-core](./packages/core/) ✅
+Shared MCP client library used by all framework adapters.
+
+**Status:** Production ready
+
+### [@cozo-memory/langchain](./packages/langchain/) ✅
+LangChain integration with persistent chat history and retriever.
+
+**Status:** Production ready  
+**Features:**
+- `CozoMemoryChatHistory` - BaseChatMessageHistory implementation
+- `CozoMemoryRetriever` - BaseRetriever with hybrid search
+- Session management
+- Graph-RAG support
+
+### [@cozo-memory/llamaindex](./packages/llamaindex/) ✅
+LlamaIndex integration with vector store and document storage.
+
+**Status:** Production ready  
+**Features:**
+- `CozoVectorStore` - BaseVectorStore implementation
+- Hybrid search and Graph-RAG
+- Persistent indexes
+- Document management
+
+### [@cozo-memory/crewai](./packages/crewai/) 📋
+CrewAI integration with storage backend (planned).
+
+**Status:** Planned  
+**Features:**
+- `CozoStorageBackend` - StorageBackend implementation
+- Multi-agent memory
+- Scoped storage
+
+## Installation
 
 ```bash
-npm install @cozo-memory/langchain
+# LangChain adapter
+npm install @cozo-memory/langchain @cozo-memory/adapters-core
+
+# LlamaIndex adapter
+npm install @cozo-memory/llamaindex @cozo-memory/adapters-core
+
+# CrewAI adapter (coming soon)
+npm install @cozo-memory/crewai @cozo-memory/adapters-core
 ```
 
-**Features:**
-- `BaseChatMessageHistory` implementation for persistent conversations
-- `BaseRetriever` with hybrid search and Graph-RAG
-- Session and task management
-- Time-travel queries
-
-### [@cozo-memory/llamaindex](./packages/llamaindex) *(Coming Soon)*
-LlamaIndex adapter for vector storage and document management.
-
-### [@cozo-memory/crewai](./packages/crewai) *(Coming Soon)*
-CrewAI adapter for multi-agent memory systems.
-
-## 🚀 Quick Start
+## Quick Start
 
 ### LangChain
 
 ```typescript
 import { CozoMemoryChatHistory } from '@cozo-memory/langchain';
-import { ChatOpenAI } from '@langchain/openai';
-import { ConversationChain } from 'langchain/chains';
 import { BufferMemory } from 'langchain/memory';
+import { ConversationChain } from 'langchain/chains';
+import { ChatOpenAI } from '@langchain/openai';
 
 const chatHistory = new CozoMemoryChatHistory({
-  sessionName: 'my-chat'
+  sessionName: 'user-123'
 });
 
+const memory = new BufferMemory({ chatHistory });
 const chain = new ConversationChain({
   llm: new ChatOpenAI(),
-  memory: new BufferMemory({ chatHistory })
+  memory
 });
 
 await chain.call({ input: 'Hello!' });
 ```
 
-## 🎯 Why Cozo Memory?
+### LlamaIndex
 
-| Feature | Cozo Memory | Pinecone | Chroma | Weaviate |
-|---------|-------------|----------|--------|----------|
-| **Local-First** | ✅ | ❌ | ✅ | ❌ |
-| **Graph-RAG** | ✅ | ❌ | ❌ | ⚠️ |
-| **Time-Travel** | ✅ | ❌ | ❌ | ❌ |
-| **Hybrid Search** | ✅ | ⚠️ | ⚠️ | ✅ |
-| **Cost** | Free | $$ | Free | $$ |
+```typescript
+import { CozoVectorStore } from '@cozo-memory/llamaindex';
+import { VectorStoreIndex, Document } from 'llamaindex';
 
-## 📚 Examples
+const vectorStore = new CozoVectorStore({
+  useGraphRAG: true
+});
 
-See the [examples directory](./examples/) for complete working examples:
+const index = await VectorStoreIndex.fromDocuments(
+  documents,
+  { vectorStore }
+);
 
-- **LangChain:**
-  - [Chatbot](./examples/langchain/chatbot.ts) - Persistent chat history
-  - [RAG](./examples/langchain/rag.ts) - Semantic search
-  - [Graph-RAG](./examples/langchain/graph-rag.ts) - Relational reasoning
+const queryEngine = index.asQueryEngine();
+const response = await queryEngine.query('What is the capital of France?');
+```
 
-## 🛠️ Development
+## Examples
 
-This is a monorepo managed with npm workspaces.
+Complete working examples are available in the [examples directory](./examples/):
+
+- [LangChain Examples](./examples/langchain/) - Chatbot, RAG, Graph-RAG
+- [LlamaIndex Examples](./examples/llamaindex/) - Basic RAG, Graph-RAG, Persistent Index
+
+## Development
+
+### Setup
 
 ```bash
 # Install dependencies
@@ -75,30 +111,63 @@ npm install
 # Build all packages
 npm run build
 
-# Run tests
-npm run test
-
-# Clean build artifacts
-npm run clean
+# Build specific package
+cd packages/langchain && npm run build
+cd packages/llamaindex && npm run build
 ```
 
-## 📖 Documentation
+### Testing
 
-- [Cozo Memory Documentation](https://github.com/tobs-code/cozo-memory)
-- [LangChain Adapter Docs](./packages/langchain/README.md)
-- [API Reference](./docs/api/)
+```bash
+# Test LangChain adapter
+cd adapters
+npx ts-node test-adapter.ts
 
-## 🤝 Contributing
+# Test LlamaIndex adapter (coming soon)
+cd examples/llamaindex
+npm run basic-rag
+```
 
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+## Architecture
 
-## 📄 License
+All adapters share a common architecture:
 
-Apache-2.0 - see [LICENSE](../LICENSE) for details.
+```
+┌─────────────────────────────────────┐
+│   Framework (LangChain/LlamaIndex)  │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│      Framework Adapter Package      │
+│  (chat_history, retriever, etc.)    │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│    @cozo-memory/adapters-core       │
+│      (Shared MCP Client)            │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│     Cozo Memory MCP Server          │
+│   (stdio or HTTP transport)         │
+└─────────────────────────────────────┘
+```
 
-## 🔗 Links
+## Why Cozo Memory?
 
-- [Cozo Memory](https://github.com/tobs-code/cozo-memory)
-- [LangChain](https://js.langchain.com/)
-- [LlamaIndex](https://www.llamaindex.ai/)
-- [CrewAI](https://www.crewai.com/)
+| Feature | Cozo Memory | Pinecone | Chroma | Weaviate |
+|---------|-------------|----------|--------|----------|
+| Local-First | ✅ | ❌ | ✅ | ✅ |
+| Hybrid Search | ✅ | ❌ | ❌ | ✅ |
+| Graph-RAG | ✅ | ❌ | ❌ | ❌ |
+| Time-Travel | ✅ | ❌ | ❌ | ❌ |
+| Cost | Free | $$ | Free | $$ |
+| Setup | Zero config | API key | Docker | Docker |
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+
+## License
+
+Apache-2.0
