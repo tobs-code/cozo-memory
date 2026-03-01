@@ -66,6 +66,8 @@ npm run start
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.
 
+🤖 **GraphRAG-R1 Adaptive Retrieval (v2.6)** - Intelligentes Retrieval-System mit Progressive Retrieval Attenuation (PRA) und Cost-Aware F1 (CAF) Scoring, das automatisch optimale Strategien basierend auf Query-Komplexität auswählt und aus historischer Performance lernt
+
 🧠 **Multi-Level Memory (v2.0)** - Kontext-bewusstes Memory-System mit integriertem Session- und Task-Management.
 
 🎯 **Tiny Learned Reranker (v2.0)** - Integriertes Cross-Encoder Modell (`ms-marco-MiniLM-L-6-v2`) für ultra-präzises Re-Ranking der Top-Suchergebnisse.

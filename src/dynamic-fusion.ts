@@ -248,7 +248,7 @@ export class DynamicFusionSearch {
       // HNSW vector search using correct CozoDB syntax
       const datalogQuery = `
         ?[id, name, type, score, metadata] := 
-          ~entity:content_hnsw{
+          ~entity:semantic{
             id | 
             query: vec($embedding), 
             k: ${config.topK},
@@ -259,7 +259,8 @@ export class DynamicFusionSearch {
             id,
             name,
             type,
-            metadata
+            metadata,
+            @ "NOW"
           },
           score = 1.0 - dist
         
@@ -371,19 +372,23 @@ export class DynamicFusionSearch {
     
     try {
       // FTS search on entity names using correct CozoDB syntax
+      // According to CozoDB v0.7 docs: bind_score (not bind_score_bm_25)
+      // score_kind can be 'tf_idf' or 'tf' (default is 'tf_idf')
       const datalogQuery = `
         ?[id, name, type, score, metadata] := 
-          ~entity:name_fts{
+          ~entity:fts{
             id | 
             query: $query,
             k: ${config.topK},
-            bind_score_bm_25: score
+            score_kind: 'tf_idf',
+            bind_score: score
           },
           *entity{
             id,
             name,
             type,
-            metadata
+            metadata,
+            @ "NOW"
           }
         
         :order -score
@@ -427,7 +432,7 @@ export class DynamicFusionSearch {
       // HNSW index returns 'id' not 'entity_id'
       const seedQuery = `
         ?[id] := 
-          ~entity:content_hnsw{
+          ~entity:semantic{
             id | 
             query: vec($embedding), 
             k: 5,
@@ -453,14 +458,14 @@ export class DynamicFusionSearch {
         
         reachable[to_id, depth] := 
           seed[from_id],
-          *relationship{from_id, to_id, relation_type},
+          *relationship{from_id, to_id, relation_type, @ "NOW"},
           ${relationFilter},
           depth = 1
         
         reachable[to_id, depth] := 
           reachable[from_id, prev_depth],
           prev_depth < ${config.maxDepth},
-          *relationship{from_id, to_id, relation_type},
+          *relationship{from_id, to_id, relation_type, @ "NOW"},
           ${relationFilter},
           depth = prev_depth + 1
         
@@ -470,7 +475,8 @@ export class DynamicFusionSearch {
             id,
             name,
             type,
-            metadata
+            metadata,
+            @ "NOW"
           },
           score = 1.0 / to_float(depth)
         

@@ -11,6 +11,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { HybridSearch } from "./hybrid-search";
 import { InferenceEngine } from "./inference-engine";
 import { DynamicFusionSearch, FusionConfig, DEFAULT_FUSION_CONFIG } from "./dynamic-fusion";
+import { AdaptiveGraphRetrieval } from "./adaptive-retrieval";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
 const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
@@ -25,6 +26,7 @@ export class MemoryServer {
   public embeddingService: EmbeddingService;
   public hybridSearch: HybridSearch;
   public dynamicFusion: DynamicFusionSearch;
+  public adaptiveRetrieval: AdaptiveGraphRetrieval;
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
   private compactionLocks: Set<string> = new Set();
@@ -82,6 +84,7 @@ export class MemoryServer {
     this.embeddingService = new EmbeddingService();
     this.hybridSearch = new HybridSearch(this.db, this.embeddingService);
     this.dynamicFusion = new DynamicFusionSearch(this.db, this.embeddingService);
+    this.adaptiveRetrieval = new AdaptiveGraphRetrieval(this.db, this.embeddingService);
     this.inferenceEngine = new InferenceEngine(this.db, this.embeddingService);
 
     this.mcp = new FastMCP({
@@ -3863,14 +3866,19 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         }).optional().describe("Dynamic fusion configuration (all paths optional)"),
         limit: z.number().optional().default(10).describe("Maximum number of results to return"),
       }),
+      z.object({
+        action: z.literal("adaptive_retrieval"),
+        query: z.string().describe("Search query for adaptive retrieval"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
+      }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval"])
         .describe("Action (determines which fields are required)"),
-      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search/dynamic_fusion"),
-      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking/dynamic_fusion"),
+      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search/dynamic_fusion/adaptive_retrieval"),
+      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking/dynamic_fusion/adaptive_retrieval"),
       session_id: z.string().optional().describe("Optional session ID for context boosting"),
       task_id: z.string().optional().describe("Optional task ID for context boosting"),
       filters: z.any().optional().describe("Only for advancedSearch"),
@@ -3903,9 +3911,10 @@ Supported actions:
 - 'graph_rag': Graph-based reasoning (Hybrid RAG). Finds semantic vector seeds first, then expands via graph traversals. Ideal for multi-hop reasoning. Params: { query: string, max_depth?: number, limit?: number }.
 - 'graph_walking': Recursive semantic graph search. Starts at vector seeds or an entity and follows relationships to other semantically relevant entities. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
 - 'agentic_search': Auto-Routing Search. Uses local LLM to analyze intent and routes the query automatically to the best strategy (Vector, Graph, or Community Summaries). Params: { query: string, limit?: number }.
+- 'adaptive_retrieval': GraphRAG-R1 inspired adaptive retrieval with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring. Automatically selects optimal strategy based on query complexity and historical performance. Params: { query: string, limit?: number }.
 - 'dynamic_fusion': Advanced multi-path fusion search combining Vector (HNSW), Sparse (keyword), FTS (full-text), and Graph traversal with configurable weights and strategies. Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }. Each path can be enabled/disabled and weighted independently. Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'. Returns results with path contribution details and performance stats.
 
-Notes: 'dynamic_fusion' provides the most control and transparency over retrieval paths. 'agentic_search' is the most adaptive. 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
+Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_fusion' provides the most control and transparency over retrieval paths. 'agentic_search' is the most adaptive. 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -4161,6 +4170,61 @@ Notes: 'dynamic_fusion' provides the most control and transparency over retrieva
             console.error('[query_memory] Dynamic Fusion error:', error);
             return JSON.stringify({ 
               error: "Dynamic fusion search failed", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "adaptive_retrieval") {
+          const startTime = Date.now();
+          
+          if (!input.query || input.query.trim().length === 0) {
+            return JSON.stringify({ error: "Search query must not be empty." });
+          }
+
+          try {
+            console.log('[query_memory] Adaptive Retrieval search:', {
+              query: input.query,
+              limit: input.limit
+            });
+
+            // Execute adaptive retrieval
+            const result = await this.adaptiveRetrieval.retrieve(
+              input.query,
+              input.limit || 10
+            );
+
+            const response = {
+              results: result.results,
+              metadata: {
+                query: input.query,
+                strategy: result.strategy,
+                retrievalCount: result.retrievalCount,
+                latency: result.latency,
+                cafScore: result.cafScore,
+                totalTime: Date.now() - startTime
+              },
+              performance: {
+                strategyUsed: result.strategy,
+                retrievalCalls: result.retrievalCount,
+                costAwareF1: result.cafScore,
+                latencyMs: result.latency
+              }
+            };
+
+            console.log('[query_memory] Adaptive Retrieval completed:', {
+              strategy: result.strategy,
+              resultsReturned: result.results.length,
+              retrievalCount: result.retrievalCount,
+              cafScore: result.cafScore?.toFixed(3),
+              totalTime: response.metadata.totalTime
+            });
+
+            return JSON.stringify(response);
+          } catch (error: any) {
+            console.error('[query_memory] Adaptive Retrieval error:', error);
+            return JSON.stringify({ 
+              error: "Adaptive retrieval search failed", 
               details: error.message 
             });
           }

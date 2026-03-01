@@ -69,7 +69,9 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
 
-🧠 **Multi-Level Memory (v2.0)** - Context-aware memory system with built-in session and task management
+� **GraphRAG-R1 Adaptive Retrieval (v2.6)** - Intelligent retrieval system with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring that automatically selects optimal strategies based on query complexity and learns from historical performance
+
+�🧠 **Multi-Level Memory (v2.0)** - Context-aware memory system with built-insession and task management 
 
 🎯 **Tiny Learned Reranker (v2.0)** - Integrated Cross-Encoder model (`ms-marco-MiniLM-L-6-v2`) for ultra-precise re-ranking of top search results
 
@@ -685,7 +687,7 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
-| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search, dynamic_fusion (Multi-Level Context support) |
+| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search, dynamic_fusion, adaptive_retrieval (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
 | `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compact |
 
@@ -798,6 +800,7 @@ Actions:
 - `graph_rag`: `{ query, max_depth?, limit?, filters?, rerank? }` Graph-based reasoning. Finds vector seeds (with inline filtering) first and then expands transitive relationships. Uses recursive Datalog for efficient BFS expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Recursive semantic graph search. Starts at vector seeds or a specific entity and follows relationships to other semantically relevant entities. Ideal for deeper path exploration.
 - `agentic_search`: `{ query, limit?, rerank? }` **(New v2.0)**: **Auto-Routing Search**. Uses a local LLM (Ollama) to analyze query intent and automatically routes it to the most appropriate strategy (`vector_search`, `graph_walk`, or `community_summary`).
+- `adaptive_retrieval`: `{ query, limit? }` **(New v2.6)**: **GraphRAG-R1 Adaptive Retrieval**. Intelligent system inspired by GraphRAG-R1 (Yu et al., WWW 2026) that automatically classifies query complexity (Simple/Moderate/Complex/Exploratory) and selects the optimal retrieval strategy from 5 options (Vector-Only, Graph-Walk, Hybrid-Fusion, Community-Expansion, Semantic-Walk). Features Progressive Retrieval Attenuation (PRA) to prevent over-retrieval and Cost-Aware F1 (CAF) scoring to balance answer quality with computational cost. Learns from usage and adapts strategy selection based on historical performance stored in CozoDB.
 - `dynamic_fusion`: `{ query, config?, limit? }` **(New v2.3)**: **Dynamic Fusion Framework**. Combines 4 retrieval paths (Dense Vector, Sparse Vector, FTS, Graph) with configurable weights and fusion strategies. Inspired by Allan-Poe (arXiv:2511.00855).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Shows temporal development of relationships including time range filter and diff summary.
 
