@@ -81,6 +81,8 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization, observation pruning, and **automated session compression**
 
+🧠 **Fact Lifecycle Management (v2.1)** - Native "soft-deletion" via CozoDB Validity retraction; invalidated facts are hidden from current views but preserved in history for audit trails
+
 👤 **User Preference Profiling** - Persistent user preferences with automatic 50% search boost
 
 🔍 **Near-Duplicate Detection** - Automatic LSH-based deduplication to avoid redundancy
@@ -129,6 +131,10 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 - **Data Integrity (Trigger Concept)**: Prevents invalid states like self-references in relationships (Self-Loops) directly at creation.
 - **Hierarchical Summarization**: The Janitor condenses old fragments into "Executive Summary" nodes to preserve the "Big Picture" long-term.
 - **User Preference Profiling**: A specialized `global_user_profile` entity stores persistent preferences (likes, work style), which receive a **50% score boost** in every search.
+- **Fact Lifecycle Management (v2.1)**: Uses CozoDB's native **Validity** retraction mechanism to manage the lifecycle of information. Instead of destructive deletions, facts are invalidated by asserting a `[timestamp, false]` record. This ensures:
+  1. **Auditability**: You can always "time-travel" back to see what the system knew at any given point.
+  2. **Consistency**: All standard retrieval (Search, Graph-RAG, Inference) uses the `@ "NOW"` filter to automatically exclude retracted facts.
+  3. **Atomic Retraction**: Invalidation can be part of a multi-statement transaction, allowing for clean "update" patterns (invalidate old + insert new).
 - **All Local**: Embeddings via Transformers/ONNX; no external embedding service required.
 
 ## Positioning & Comparison
@@ -523,7 +529,7 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
-| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file |
+| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
 | `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
@@ -543,6 +549,8 @@ Actions:
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(New v1.2)**: Executes multiple operations atomically.
 - `add_inference_rule`: `{ name, datalog }`
 - `ingest_file`: `{ format, file_path?, content?, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+- `invalidate_observation`: `{ observation_id }` **(New v2.1)**: Retracts an observation using Validity `[now, false]`.
+- `invalidate_relation`: `{ from_id, to_id, relation_type }` **(New v2.1)**: Retracts a relationship using Validity `[now, false]`.
   - `format` options: `"markdown"`, `"json"`, `"pdf"` **(New v1.9)**
   - `file_path`: Optional path to file on disk (alternative to `content` parameter)
   - `content`: File content as string (required if `file_path` not provided)

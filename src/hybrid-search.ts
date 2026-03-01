@@ -285,7 +285,7 @@ export class HybridSearch {
     }
     semanticCall += `}`;
 
-    let bodyConstraints = [semanticCall, `*entity{id, name, type, metadata, created_at}`];
+    let bodyConstraints = [semanticCall, `*entity{id, name, type, metadata, created_at, @ "NOW"}`];
     if (metaJoins.length > 0) {
       bodyConstraints.push(...metaJoins);
     }
@@ -319,14 +319,14 @@ export class HybridSearch {
     ];
     if (graphConstraints?.requiredRelations && graphConstraints.requiredRelations.length > 0) {
       helperRules.push(
-        `rel_match[id, rel_type] := *relationship{from_id: id, relation_type: rel_type}`,
-        `rel_match[id, rel_type] := *relationship{to_id: id, relation_type: rel_type}`
+        `rel_match[id, rel_type] := *relationship{from_id: id, relation_type: rel_type, @ "NOW"}`,
+        `rel_match[id, rel_type] := *relationship{to_id: id, relation_type: rel_type, @ "NOW"}`
       );
     }
     if (graphConstraints?.targetEntityIds && graphConstraints.targetEntityIds.length > 0) {
       helperRules.push(
-        `target_match[id, target_id] := *relationship{from_id: id, to_id: target_id}`,
-        `target_match[id, target_id] := *relationship{to_id: id, from_id: target_id}`
+        `target_match[id, target_id] := *relationship{from_id: id, to_id: target_id, @ "NOW"}`,
+        `target_match[id, target_id] := *relationship{to_id: id, from_id: target_id, @ "NOW"}`
       );
     }
 
@@ -468,7 +468,7 @@ export class HybridSearch {
 
       result_entities[id, final_score, depth] := path[seed_id, id, depth], seeds[seed_id, seed_score], rank_val[id, pr], final_score = seed_score * (1.0 - 0.2 * depth)
       
-      ?[id, name, type, metadata, created_at, score, source, text] := result_entities[id, score, depth], *entity{id, name, type, metadata, created_at}, source = 'graph_rag_entity', text = ''
+      ?[id, name, type, metadata, created_at, score, source, text] := result_entities[id, score, depth], *entity{id, name, type, metadata, created_at, @ "NOW"}, source = 'graph_rag_entity', text = ''
       
       :sort -score
       :limit $limit

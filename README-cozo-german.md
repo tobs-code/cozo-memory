@@ -78,6 +78,8 @@ npm run start
 
 🧹 **Janitor-Service** - LLM-gestützte automatische Bereinigung mit hierarchischer Summarization und Observation-Pruning.
 
+🧠 **Fact Lifecycle Management (v2.1)** - Natives „Soft-Deletion“ via CozoDB Validity Retraction; ungültige Fakten werden aus aktuellen Sichten ausgeblendet, bleiben aber in der Historie für Audits erhalten.
+
 👤 **User Preference Profiling** - Persistente User-Präferenzen mit automatischem 50% Search-Boost
 
 🔍 **Near-Duplicate Detection** - Automatische LSH-basierte Deduplizierung zur Vermeidung von Redundanz
@@ -132,6 +134,10 @@ Wesentliche Eigenschaften:
 - **Datenintegrität (Trigger-Konzept)**: Verhindert ungültige Zustände wie Selbst-Referenzen in Beziehungen (Self-Loops) direkt bei der Erstellung.
 - **Hierarchische Summarization**: Der Janitor verdichtet alte Fragmente zu „Executive Summary“-Knoten, um das „Big Picture“ langfristig zu erhalten.
 - **User Preference Profiling**: Eine spezialisierte `global_user_profile` Entität speichert persistente Präferenzen (Vorlieben, Arbeitsstil), die bei jeder Suche einen **50% Score-Boost** erhalten.
+- **Fact Lifecycle Management (v2.1)**: Nutzt den nativen **Validity Retraction** Mechanismus von CozoDB. Anstatt Daten destruktiv zu löschen, werden Fakten durch einen `[timestamp, false]` Eintrag als ungültig markiert.
+  1. **Revisionssicherheit**: Man kann jederzeit „zurück in der Zeit“ reisen, um zu sehen, was das System zu einem bestimmten Zeitpunkt wusste.
+  2. **Konsistenz**: Alle Standard-Abfragen (Search, Graph-RAG, Inference) nutzen den `@ "NOW"` Filter, um zurückgezogene Fakten automatisch auszuschließen.
+  3. **Atomare Retraction**: Ungültigkeitserklärungen können Teil einer Transaktion sein, was saubere Update-Pattern (altes ungültig machen + neues einfügen) ermöglicht.
 - **Alles lokal**: Embeddings via Transformers/ONNX; kein externer Embedding-Dienst nötig.
 
 ## Positionierung & Vergleich
@@ -395,7 +401,7 @@ Die Oberfläche ist auf **4 konsolidierte Tools** reduziert. Die konkrete Operat
 
 | Tool | Zweck | Wichtige Aktionen |
 |------|-------|-------------------|
-| `mutate_memory` | Schreiboperationen | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file |
+| `mutate_memory` | Schreiboperationen | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Leseoperationen | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search |
 | `analyze_graph` | Graph-Analyse | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
 | `manage_system` | Wartung | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
@@ -411,6 +417,8 @@ Aktionen:
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(Neu v1.2)**: Führt mehrere Operationen atomar aus.
 - `add_inference_rule`: `{ name, datalog }`
 - `ingest_file`: `{ format, file_path?, content?, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
+- `invalidate_observation`: `{ observation_id }` **(Neu v2.1)**: Zieht eine Observation mittels Validity `[now, false]` zurück.
+- `invalidate_relation`: `{ from_id, to_id, relation_type }` **(Neu v2.1)**: Zieht eine Beziehung mittels Validity `[now, false]` zurück.
   - `format` Optionen: `"markdown"`, `"json"`, `"pdf"` **(Neu v1.9)**
   - `file_path`: Optionaler Pfad zur Datei auf der Festplatte (Alternative zum `content` Parameter)
   - `content`: Dateiinhalt als String (erforderlich wenn `file_path` nicht angegeben)

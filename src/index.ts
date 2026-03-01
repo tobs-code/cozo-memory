@@ -2523,9 +2523,82 @@ ids[id] <- $ids
     }
   }
 
+  public async invalidateObservation(args: { observation_id: string }) {
+    await this.initPromise;
+    const startTime = Date.now();
+    try {
+      const now = Date.now() * 1000;
+      // Invalidate by putting a retraction (assertive=false) at current time
+      const existing = await this.db.run(`?[id, entity_id, session_id, task_id, text, embedding, metadata] := *observation{id, entity_id, session_id, task_id, text, embedding, metadata, @ "NOW"}, id = $id`, { id: args.observation_id });
+
+      if (existing.rows.length === 0) {
+        return { error: "Observation not found or already invalidated" };
+      }
+
+      const row = existing.rows[0];
+      const params = {
+        id: row[0],
+        v: [now, false],
+        entity_id: row[1],
+        session_id: row[2],
+        task_id: row[3],
+        text: row[4],
+        embedding: row[5],
+        metadata: row[6]
+      };
+
+      await this.db.run(`
+        ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] <- [[$id, $v, $entity_id, $session_id, $task_id, $text, $embedding, $metadata]]
+        :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
+      `, params);
+
+      this.trackOperation('invalidate_observation', startTime);
+      return { status: "Observation invalidated", id: args.observation_id, invalidated_at: now };
+    } catch (error: any) {
+      console.error("[InvalidateObs] Error:", error);
+      this.trackError('invalidate_observation');
+      return { error: "Invalidation failed", message: error.message };
+    }
+  }
+
+  public async invalidateRelationship(args: { from_id: string, to_id: string, relation_type: string }) {
+    await this.initPromise;
+    const startTime = Date.now();
+    try {
+      const now = Date.now() * 1000;
+      const existing = await this.db.run(`?[f, t, type, strength, metadata] := *relationship{from_id: f, to_id: t, relation_type: type, strength, metadata, @ "NOW"}, f = $f, t = $t, type = $type`, { f: args.from_id, t: args.to_id, type: args.relation_type });
+
+      if (existing.rows.length === 0) {
+        return { error: "Relationship not found or already invalidated" };
+      }
+
+      const row = existing.rows[0];
+      const params = {
+        f: row[0],
+        t: row[1],
+        type: row[2],
+        v: [now, false],
+        strength: row[3],
+        metadata: row[4]
+      };
+
+      await this.db.run(`
+        ?[from_id, to_id, relation_type, created_at, strength, metadata] <- [[$f, $t, $type, $v, $strength, $metadata]]
+        :put relationship {from_id, to_id, relation_type, created_at => strength, metadata}
+      `, params);
+
+      this.trackOperation('invalidate_relationship', startTime);
+      return { status: "Relationship invalidated", from_id: args.from_id, to_id: args.to_id, relation_type: args.relation_type, invalidated_at: now };
+    } catch (error: any) {
+      console.error("[InvalidateRel] Error:", error);
+      this.trackError('invalidate_relationship');
+      return { error: "Invalidation failed", message: error.message };
+    }
+  }
+
   public async runTransaction(args: {
     operations: Array<{
-      action: "create_entity" | "add_observation" | "create_relation" | "delete_entity";
+      action: "create_entity" | "add_observation" | "create_relation" | "delete_entity" | "invalidate_observation" | "invalidate_relation";
       params: any;
     }>
   }) {
@@ -2749,6 +2822,50 @@ ids[id] <- $ids
             `);
 
             results.push({ action: "delete_entity", id: entity_id });
+            break;
+          }
+
+          case "invalidate_observation": {
+            const { observation_id } = params;
+            if (!observation_id) {
+              return { error: `Missing observation_id for invalidate_observation in operation ${i}` };
+            }
+            const now = Date.now() * 1000;
+            allParams[`inv_obs_id${suffix}`] = observation_id;
+            allParams[`inv_obs_v${suffix}`] = [now, false];
+
+            statements.push(`
+              {
+                ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] := 
+                  *observation{id, entity_id, session_id, task_id, text, embedding, metadata, @ "NOW"}, 
+                  id = $inv_obs_id${suffix}, created_at = $inv_obs_v${suffix}
+                :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
+              }
+            `);
+            results.push({ action: "invalidate_observation", id: observation_id });
+            break;
+          }
+
+          case "invalidate_relation": {
+            const { from_id, to_id, relation_type } = params;
+            if (!from_id || !to_id || !relation_type) {
+              return { error: `Missing from_id, to_id, or relation_type for invalidate_relation in operation ${i}` };
+            }
+            const now = Date.now() * 1000;
+            allParams[`inv_rel_f${suffix}`] = from_id;
+            allParams[`inv_rel_t${suffix}`] = to_id;
+            allParams[`inv_rel_type${suffix}`] = relation_type;
+            allParams[`inv_rel_v${suffix}`] = [now, false];
+
+            statements.push(`
+              {
+                ?[from_id, to_id, relation_type, created_at, strength, metadata] := 
+                  *relationship{from_id, to_id, relation_type, strength, metadata, @ "NOW"}, 
+                  from_id = $inv_rel_f${suffix}, to_id = $inv_rel_t${suffix}, relation_type = $inv_rel_type${suffix}, created_at = $inv_rel_v${suffix}
+                :put relationship {from_id, to_id, relation_type, created_at => strength, metadata}
+              }
+            `);
+            results.push({ action: "invalidate_relation", from_id, to_id, relation_type });
             break;
           }
 
@@ -2994,6 +3111,16 @@ ids[id] <- $ids
         entity_id: z.string().describe("ID of the entity to delete"),
       }).passthrough(),
       z.object({
+        action: z.literal("invalidate_observation"),
+        observation_id: z.string().describe("ID of the observation to invalidate"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("invalidate_relation"),
+        from_id: z.string().describe("Source entity ID"),
+        to_id: z.string().describe("Target entity ID"),
+        relation_type: z.string().describe("Type of the relationship"),
+      }).passthrough(),
+      z.object({
         action: z.literal("add_observation"),
         entity_id: z.string().optional().describe("ID of the entity"),
         entity_name: z.string().optional().describe("Name of the entity (will be created if not exists)"),
@@ -3170,6 +3297,8 @@ Supported actions:
 - 'stop_session': Closes a session. Params: { id: string }.
 - 'start_task': Initializes a new task within a session. Params: { name: string, session_id?: string, metadata?: object }.
 - 'stop_task': Marks a task as completed. Params: { id: string }.
+- 'invalidate_observation': Invalidates (soft-deletes) an observation at the current time. Params: { observation_id: string }.
+- 'invalidate_relation': Invalidates (soft-deletes) a relationship at the current time. Params: { from_id: string, to_id: string, relation_type: string }.
 
 Validation: Invalid syntax or missing columns in inference rules will result in errors.`,
       parameters: MutateMemoryParameters,
@@ -3198,6 +3327,8 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         if (action === "add_observation") return JSON.stringify(await this.addObservation(rest));
         if (action === "create_relation") return JSON.stringify(await this.createRelation(rest));
         if (action === "run_transaction") return JSON.stringify(await this.runTransaction(rest));
+        if (action === "invalidate_observation") return JSON.stringify(await this.invalidateObservation(rest));
+        if (action === "invalidate_relation") return JSON.stringify(await this.invalidateRelationship(rest));
         if (action === "delete_entity") return JSON.stringify(await this.deleteEntity({ entity_id: rest.entity_id }));
         if (action === "add_inference_rule") return JSON.stringify(await this.addInferenceRule(rest));
         if (action === "ingest_file") return JSON.stringify(await this.ingestFile(rest));
