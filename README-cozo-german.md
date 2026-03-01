@@ -223,10 +223,10 @@ graph TB
     Services --> Inference
     Services --> DB
     
-    style Client fill:#e1f5ff
-    style Server fill:#fff4e1
-    style Services fill:#f0e1ff
-    style DB fill:#e1ffe1
+    style Client fill:#e1f5ff,color:#000
+    style Server fill:#fff4e1,color:#000
+    style Services fill:#f0e1ff,color:#000
+    style DB fill:#e1ffe1,color:#000
 ```
 
 ### Graph-Walking Visualisierung
@@ -247,12 +247,12 @@ graph LR
     E1 -->|colleague_of| E4
     E4 -.semantisch: auch relevant.-> E2
     
-    style Start fill:#e1f5ff
-    style V1 fill:#fff4e1
-    style E1 fill:#ffe1e1
-    style E2 fill:#e1ffe1
-    style E3 fill:#f0e1ff
-    style E4 fill:#ffe1e1
+    style Start fill:#e1f5ff,color:#000
+    style V1 fill:#fff4e1,color:#000
+    style E1 fill:#ffe1e1,color:#000
+    style E2 fill:#e1ffe1,color:#000
+    style E3 fill:#f0e1ff,color:#000
+    style E4 fill:#ffe1e1,color:#000
 ```
 
 ## Installation
