@@ -100,6 +100,8 @@ export class MemoryServer {
     model?: string;
   }) {
     await this.initPromise;
+    console.error(`[Janitor] Starting cleanup (auto-compressing sessions first)...`);
+    await this.compressSessions({ model: args.model });
 
     const olderThanDays = Math.max(1, Math.floor(args.older_than_days ?? 30));
     const maxObservations = Math.max(1, Math.floor(args.max_observations ?? 20));
@@ -378,6 +380,87 @@ export class MemoryServer {
       cache_deleted: cacheDeletedCount,
       results,
     };
+  }
+
+  private async compressSessions(args: { model?: string }) {
+    const model = args.model ?? "demyagent-4b-i1:Q6_K";
+    const inactiveThreshold = Date.now() - 30 * 60 * 1000; // 30 minutes
+
+    try {
+      // 1. Find inactive open sessions
+      const inactiveRes = await this.db.run(
+        `?[session_id, last_active, metadata] := *session_state{session_id, last_active, status, metadata}, status == 'open', last_active < $threshold`,
+        { threshold: inactiveThreshold }
+      );
+
+      if (inactiveRes.rows.length === 0) {
+        console.error(`[Janitor] No inactive sessions found for compression.`);
+        return;
+      }
+
+      console.error(`[Janitor] Found ${inactiveRes.rows.length} inactive sessions to compress.`);
+
+      for (const row of inactiveRes.rows) {
+        const sessionId = row[0] as string;
+        const lastActive = row[1];
+        const metadata = row[2] as any;
+
+        // 2. Fetch observations for this session
+        const obsRes = await this.db.run(
+          `?[text] := *observation{session_id: $session_id, text, @ "NOW"}`,
+          { session_id: sessionId }
+        );
+
+        if (obsRes.rows.length > 0) {
+          const sessionLogs = obsRes.rows.map((r: any) => r[0] as string);
+
+          // 3. Summarize using LLM
+          const systemPrompt = "You are a memory consolidation service. Summarize the following session logs into exactly 2-3 concise bullet points for long-term storage. Respond ONLY with the bullet points.";
+          const userPrompt = `Session Logs for ${sessionId}:\n\n` + sessionLogs.join('\n');
+
+          let summaryText: string;
+          try {
+            const ollamaMod: any = await import("ollama");
+            const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+            const response = await ollamaClient.chat({
+              model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+            });
+            summaryText = (response as any)?.message?.content?.trim?.() ?? "";
+          } catch (e: any) {
+            console.warn(`[Janitor] LLM failed for session ${sessionId}: ${e.message}. Using basic concatenation.`);
+            summaryText = sessionLogs.join('\n').slice(0, 500);
+          }
+
+          if (summaryText) {
+            // 4. Write compression summary to global user profile
+            await this.addObservation({
+              entity_id: "global_user_profile",
+              text: `Session Summary (${sessionId}):\n${summaryText}`,
+              metadata: {
+                kind: "session_compression",
+                original_session_id: sessionId,
+                summarized_at: new Date().toISOString()
+              }
+            });
+          }
+        }
+
+        // 5. Mark session as compressed
+        await this.db.run(
+          `?[session_id, last_active, status, metadata] <- $data
+           :put session_state {session_id, last_active, status, metadata}`,
+          {
+            data: [[sessionId, lastActive, "compressed", metadata]]
+          }
+        );
+      }
+    } catch (e: any) {
+      console.error(`[Janitor] Session compression error:`, e.message);
+    }
   }
 
   public async advancedSearch(args: Parameters<HybridSearch['advancedSearch']>[0]) {
@@ -780,26 +863,42 @@ export class MemoryServer {
       // Observation Table
       if (!relations.includes("observation")) {
         try {
-          await this.db.run(`{:create observation {id: String, created_at: Validity => entity_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}`);
+          await this.db.run(`{:create observation {id: String, created_at: Validity => entity_id: String, session_id: String, task_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}`);
           console.error("[Schema] Observation table created.");
         } catch (e: any) {
           console.error("[Schema] Observation table error:", e.message);
         }
       } else {
+        const columnsRes = await this.db.run(`::columns observation`);
+        const columns = columnsRes.rows.map((r: any) => r[0]);
         const timeTravelReady = await this.isTimeTravelReady("observation");
-        if (!timeTravelReady) {
+
+        if (!columns.includes("session_id") || !columns.includes("task_id") || !timeTravelReady) {
+          console.error("[Schema] Migrating observation table for Session/Task support...");
           // Drop indices before migration
           try { await this.db.run("::hnsw drop observation:semantic"); } catch (e) { }
           try { await this.db.run("::fts drop observation:fts"); } catch (e) { }
           try { await this.db.run("::lsh drop observation:lsh"); } catch (e) { }
 
-          await this.db.run(`
-            ?[id, created_at, entity_id, text, embedding, metadata] :=
-              *observation{id, entity_id, text, embedding, metadata, created_at: created_at_raw},
-              created_at = [created_at_raw, true]
-            :replace observation {id: String, created_at: Validity => entity_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}
-          `);
-          console.error("[Schema] Observation table migrated (Validity).");
+          if (!timeTravelReady) {
+            await this.db.run(`
+              ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] :=
+                *observation{id, entity_id, text, embedding, metadata, created_at: created_at_raw},
+                created_at = [created_at_raw, true],
+                session_id = "",
+                task_id = ""
+              :replace observation {id: String, created_at: Validity => entity_id: String, session_id: String, task_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}
+            `);
+          } else {
+            await this.db.run(`
+              ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] :=
+                *observation{id, entity_id, text, embedding, metadata, created_at},
+                session_id = "",
+                task_id = ""
+              :replace observation {id: String, created_at: Validity => entity_id: String, session_id: String, task_id: String, text: String, embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}
+            `);
+          }
+          console.error("[Schema] Observation table migrated (Session/Task/Validity).");
         }
       }
 
@@ -934,6 +1033,26 @@ export class MemoryServer {
           console.error("[Schema] Snapshot table created.");
         } catch (e: any) {
           console.error("[Schema] Snapshot table error:", e.message);
+        }
+      }
+
+      // Session State Table
+      if (!relations.includes("session_state")) {
+        try {
+          await this.db.run('{:create session_state {session_id: String => last_active: Int, status: String, metadata: Json}}');
+          console.error("[Schema] Session State table created.");
+        } catch (e: any) {
+          console.error("[Schema] Session State table error:", e.message);
+        }
+      }
+
+      // Task State Table
+      if (!relations.includes("task_state")) {
+        try {
+          await this.db.run('{:create task_state {task_id: String => status: String, session_id: String, metadata: Json}}');
+          console.error("[Schema] Task State table created.");
+        } catch (e: any) {
+          console.error("[Schema] Task State table error:", e.message);
         }
       }
 
@@ -1336,7 +1455,16 @@ export class MemoryServer {
     }
   }
 
-  public async addObservation(args: { entity_id?: string; entity_name?: string; entity_type?: string; text: string; metadata?: any; deduplicate?: boolean }) {
+  public async addObservation(args: {
+    entity_id?: string;
+    entity_name?: string;
+    entity_type?: string;
+    text: string;
+    metadata?: any;
+    deduplicate?: boolean;
+    session_id?: string;
+    task_id?: string;
+  }) {
     try {
       if (!args.text || args.text.trim() === "") {
         return { error: "Observation text must not be empty" };
@@ -1419,11 +1547,38 @@ export class MemoryServer {
       }
 
       const now = Date.now() * 1000;
+      const session_id = args.session_id ?? "";
+      const task_id = args.task_id ?? "";
+
       await this.db.run(`
-        ?[id, created_at, entity_id, text, embedding, metadata] <- [
-          [$id, [${now}, true], $entity_id, $text, $embedding, $metadata]
-        ] :insert observation {id, created_at => entity_id, text, embedding, metadata}
-      `, { id, entity_id: entityId, text: args.text, embedding, metadata: args.metadata || {} });
+        ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] <- [
+          [$id, [${now}, true], $entity_id, $session, $task, $text, $embedding, $metadata]
+        ] :insert observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
+      `, {
+        id,
+        entity_id: entityId,
+        session: session_id,
+        task: task_id,
+        text: args.text,
+        embedding,
+        metadata: args.metadata || {}
+      });
+
+      // Update session activity if session_id is provided
+      if (session_id) {
+        try {
+          await this.db.run(`
+            ?[id, last_active, status, metadata] :=
+              *session_state{id, metadata},
+              id = $id,
+              last_active = $now,
+              status = "active"
+            :update session_state {id => last_active, status, metadata}
+          `, { id: session_id, now: Math.floor(now / 1000000) });
+        } catch (e: any) {
+          console.warn(`[AddObservation] Session activity update failed for ${session_id}:`, e.message);
+        }
+      }
 
       // Optional: Automatic inference after new observation (in background)
       const suggestionsRaw = await this.inferenceEngine.inferRelations(entityId);
@@ -1433,6 +1588,8 @@ export class MemoryServer {
       return {
         id,
         entity_id: entityId,
+        session_id,
+        task_id,
         created_at: now,
         created_at_iso,
         status: "Observation saved",
@@ -1441,6 +1598,73 @@ export class MemoryServer {
     } catch (error: any) {
       return { error: error.message || "Unknown error" };
     }
+  }
+
+  public async startSession(args: { name?: string, metadata?: any }) {
+    await this.initPromise;
+    const id = uuidv4();
+    const now = Math.floor(Date.now() / 1000);
+    const name = args.name || `Session ${new Date().toISOString()}`;
+
+    // Create a Session entity first
+    await this.createEntity({
+      name,
+      type: "Session",
+      metadata: { session_id: id, ...args.metadata }
+    });
+
+    await this.db.run(`
+      ?[session_id, last_active, status, metadata] <- [[$id, $now, "active", $metadata]]
+      :insert session_state {session_id => last_active, status, metadata}
+    `, { id, now, metadata: args.metadata || {} });
+
+    return { id, name, status: "Session started" };
+  }
+
+  public async stopSession(args: { id: string }) {
+    await this.initPromise;
+    await this.db.run(`
+      ?[session_id, last_active, status, metadata] :=
+        *session_state{session_id, last_active, metadata},
+        session_id = $id,
+        status = "closed"
+      :update session_state {session_id => last_active, status, metadata}
+    `, { id: args.id });
+
+    return { id: args.id, status: "Session closed" };
+  }
+
+  public async startTask(args: { name: string, session_id?: string, metadata?: any }) {
+    await this.initPromise;
+    const id = uuidv4();
+    const sessionId = args.session_id || "";
+
+    // Create a Task entity
+    await this.createEntity({
+      name: args.name,
+      type: "Task",
+      metadata: { task_id: id, session_id: sessionId, ...args.metadata }
+    });
+
+    await this.db.run(`
+      ?[task_id, status, session_id, metadata] <- [[$id, "active", $session, $metadata]]
+      :insert task_state {task_id => status, session_id, metadata}
+    `, { id, session: sessionId, metadata: args.metadata || {} });
+
+    return { id, name: args.name, session_id: sessionId, status: "Task started" };
+  }
+
+  public async stopTask(args: { id: string }) {
+    await this.initPromise;
+    await this.db.run(`
+      ?[task_id, status, session_id, metadata] :=
+        *task_state{task_id, session_id, metadata},
+        task_id = $id,
+        status = "completed"
+      :update task_state {task_id => status, session_id, metadata}
+    `, { id: args.id });
+
+    return { id: args.id, status: "Task stopped" };
   }
 
   public async createRelation(args: { from_id: string, to_id: string, relation_type: string, strength?: number, metadata?: any }) {
@@ -2418,15 +2642,17 @@ ids[id] <- $ids
 
             allParams[`obs_id${suffix}`] = id;
             allParams[`obs_entity_id${suffix}`] = entity_id;
+            allParams[`obs_session_id${suffix}`] = params.session_id || "";
+            allParams[`obs_task_id${suffix}`] = params.task_id || "";
             allParams[`obs_text${suffix}`] = text || "";
             allParams[`obs_embedding${suffix}`] = embedding;
             allParams[`obs_metadata${suffix}`] = metadata || {};
 
             statements.push(`
               {
-                ?[id, created_at, entity_id, text, embedding, metadata] <- [
-                  [$obs_id${suffix}, [${now}, true], $obs_entity_id${suffix}, $obs_text${suffix}, $obs_embedding${suffix}, $obs_metadata${suffix}]
-                ] :insert observation {id, created_at => entity_id, text, embedding, metadata}
+                ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] <- [
+                  [$obs_id${suffix}, [${now}, true], $obs_entity_id${suffix}, $obs_session_id${suffix}, $obs_task_id${suffix}, $obs_text${suffix}, $obs_embedding${suffix}, $obs_metadata${suffix}]
+                ] :insert observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
               }
             `);
             results.push({ action: "add_observation", id, entity_id });
@@ -2775,6 +3001,8 @@ ids[id] <- $ids
         text: z.string().describe("The fact or observation"),
         metadata: MetadataSchema.optional().describe("Additional metadata"),
         deduplicate: z.boolean().optional().default(true).describe("Skip exact duplicates"),
+        session_id: z.string().optional().describe("Associated session ID"),
+        task_id: z.string().optional().describe("Associated task ID"),
       }).passthrough().refine((v) => Boolean((v as any).entity_id) || Boolean((v as any).entity_name), {
         message: "entity_id or entity_name is required",
         path: ["entity_id"],
@@ -2866,11 +3094,30 @@ ids[id] <- $ids
         message: "file_path or content is required for ingest_file",
         path: ["file_path"],
       }),
+      z.object({
+        action: z.literal("start_session"),
+        name: z.string().optional().describe("Optional name for the session"),
+        metadata: MetadataSchema.optional().describe("Additional metadata"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("stop_session"),
+        id: z.string().describe("ID of the session to stop"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("start_task"),
+        name: z.string().describe("Name of the task"),
+        session_id: z.string().optional().describe("Optional session ID this task belongs to"),
+        metadata: MetadataSchema.optional().describe("Additional metadata"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("stop_task"),
+        id: z.string().describe("ID of the task to stop"),
+      }).passthrough(),
     ]);
 
     const MutateMemoryParameters = z.object({
       action: z
-        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file"])
+        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task"])
         .describe("Action (determines which fields are required)"),
       name: z.string().optional().describe("For create_entity (required) or add_inference_rule (required)"),
       type: z.string().optional().describe("For create_entity (required)"),
@@ -2919,6 +3166,10 @@ Supported actions:
   Example (Manager Transitivity):
   '?[from_id, to_id, relation_type, confidence, reason] := *relationship{from_id: $id, to_id: mid, relation_type: "manager_of", @ "NOW"}, *relationship{from_id: mid, to_id: target, relation_type: "manager_of", @ "NOW"}, from_id = $id, to_id = target, relation_type = "ober_manager_von", confidence = 0.6, reason = "Transitive Manager Path"'
 - 'ingest_file': Bulk import of documents (Markdown/JSON). Supports chunking (paragraphs) and automatic entity creation. Params: { entity_id | entity_name (required), format, content, ... }. Ideal for quickly populating memory from existing notes.
+- 'start_session': Initializes a new session for context tracking. Params: { name?: string, metadata?: object }.
+- 'stop_session': Closes a session. Params: { id: string }.
+- 'start_task': Initializes a new task within a session. Params: { name: string, session_id?: string, metadata?: object }.
+- 'stop_task': Marks a task as completed. Params: { id: string }.
 
 Validation: Invalid syntax or missing columns in inference rules will result in errors.`,
       parameters: MutateMemoryParameters,
@@ -2950,6 +3201,10 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         if (action === "delete_entity") return JSON.stringify(await this.deleteEntity({ entity_id: rest.entity_id }));
         if (action === "add_inference_rule") return JSON.stringify(await this.addInferenceRule(rest));
         if (action === "ingest_file") return JSON.stringify(await this.ingestFile(rest));
+        if (action === "start_session") return JSON.stringify(await this.startSession(rest));
+        if (action === "stop_session") return JSON.stringify(await this.stopSession(rest));
+        if (action === "start_task") return JSON.stringify(await this.startTask(rest));
+        if (action === "stop_task") return JSON.stringify(await this.stopTask(rest));
         return JSON.stringify({ error: "Unknown action" });
       },
     });
@@ -2963,6 +3218,8 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         include_entities: z.boolean().optional().default(true).describe("Include entities in search"),
         include_observations: z.boolean().optional().default(true).describe("Include observations in search"),
         rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
+        session_id: z.string().optional().describe("Prioritize results from this session"),
+        task_id: z.string().optional().describe("Prioritize results from this task"),
       }),
       z.object({
         action: z.literal("advancedSearch"),
@@ -2990,6 +3247,8 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
           efSearch: z.number().optional().describe("HNSW search precision"),
         }).optional().describe("Vector parameters"),
         rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
+        session_id: z.string().optional().describe("Prioritize results from this session"),
+        task_id: z.string().optional().describe("Prioritize results from this task"),
       }),
       z.object({
         action: z.literal("context"),
@@ -3025,6 +3284,8 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         query: z.string().describe("Context query for agentic routing"),
         limit: z.number().optional().default(10).describe("Maximum number of results"),
         rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
+        session_id: z.string().optional().describe("Prioritize results from this session"),
+        task_id: z.string().optional().describe("Prioritize results from this task"),
       }),
     ]);
 
@@ -3034,6 +3295,8 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         .describe("Action (determines which fields are required)"),
       query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search"),
       limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking"),
+      session_id: z.string().optional().describe("Optional session ID for context boosting"),
+      task_id: z.string().optional().describe("Optional task ID for context boosting"),
       filters: z.any().optional().describe("Only for advancedSearch"),
       graphConstraints: z.any().optional().describe("Only for advancedSearch"),
       vectorOptions: z.any().optional().describe("Only for advancedSearch"),
@@ -3083,6 +3346,8 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             includeEntities: input.include_entities,
             includeObservations: input.include_observations,
             rerank: input.rerank,
+            session_id: input.session_id,
+            task_id: input.task_id,
           });
 
           const conflictEntityIds = Array.from(
@@ -3124,6 +3389,8 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             graphConstraints: input.graphConstraints,
             vectorParams: input.vectorParams,
             rerank: input.rerank,
+            session_id: input.session_id,
+            task_id: input.task_id,
           });
 
           const conflictEntityIds = Array.from(
@@ -4150,6 +4417,7 @@ Note: Use 'mutate_memory' with action='add_observation' and entity_id='global_us
   }
 
   public async start() {
+    await this.initPromise;
     await this.mcp.start({ transportType: "stdio" });
     console.error("Cozo Memory MCP Server running on stdio");
   }

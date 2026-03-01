@@ -63,6 +63,8 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
 
+🧠 **Multi-Level Memory (v2.0)** - Context-aware memory system with built-in session and task management
+
 🎯 **Tiny Learned Reranker (v2.0)** - Integrated Cross-Encoder model (`ms-marco-MiniLM-L-6-v2`) for ultra-precise re-ranking of top search results
 
 🎯 **Multi-Vector Support (since v1.7)** - Dual embeddings per entity: content-embedding for context, name-embedding for identification
@@ -77,7 +79,7 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🏗️ **Hierarchical GraphRAG (v2.0)** - Automatic generation of thematic "Community Summaries" using local LLMs to enable global "Big Picture" reasoning
 
-🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization and observation pruning
+🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization, observation pruning, and **automated session compression**
 
 👤 **User Preference Profiling** - Persistent user preferences with automatic 50% search boost
 
@@ -368,6 +370,7 @@ CozoDB Memory includes a full-featured CLI for all operations:
 # System operations
 cozo-memory system health
 cozo-memory system metrics
+cozo-memory system reflect
 
 # Entity operations
 cozo-memory entity create -n "MyEntity" -t "person" -m '{"age": 30}'
@@ -383,11 +386,19 @@ cozo-memory relation create --from <id1> --to <id2> --type "knows" -s 0.8
 # Search
 cozo-memory search query -q "search term" -l 10
 cozo-memory search context -q "context query"
+cozo-memory search agentic -q "agentic query"
 
 # Graph operations
 cozo-memory graph explore -s <entity-id> -h 3
 cozo-memory graph pagerank
 cozo-memory graph communities
+cozo-memory graph summarize
+
+# Session & Task management
+cozo-memory session start -n "My Session"
+cozo-memory session stop -i <session-id>
+cozo-memory task start -n "My Task" -s <session-id>
+cozo-memory task stop -i <task-id>
 
 # Export/Import
 cozo-memory export json -o backup.json --include-metadata --include-relationships --include-observations
@@ -512,8 +523,8 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
-| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file |
-| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search |
+| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file |
+| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
 | `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
 
@@ -525,6 +536,10 @@ Actions:
 - `delete_entity`: `{ entity_id }`
 - `add_observation`: `{ entity_id?, entity_name?, entity_type?, text, metadata? }`
 - `create_relation`: `{ from_id, to_id, relation_type, strength?, metadata? }`
+- `start_session`: `{ name?, metadata? }` **(New v2.0)**: Starts a new session context (metadata can include `user_id`, `project`, etc.)
+- `stop_session`: `{ session_id }` **(New v2.0)**: Closes/archives an active session.
+- `start_task`: `{ name, session_id?, metadata? }` **(New v2.0)**: Starts a specific task within a session.
+- `stop_task`: `{ task_id }` **(New v2.0)**: Marks a task as completed.
 - `run_transaction`: `{ operations: Array<{ action, params }> }` **(New v1.2)**: Executes multiple operations atomically.
 - `add_inference_rule`: `{ name, datalog }`
 - `ingest_file`: `{ format, file_path?, content?, entity_id?, entity_name?, entity_type?, chunking?, metadata?, observation_metadata?, deduplicate?, max_observations? }`
@@ -721,6 +736,7 @@ Janitor Cleanup Details:
 - `cleanup` supports `dry_run`: with `confirm: false` only candidates are listed.
 - With `confirm: true`, the Janitor becomes active:
   - **Hierarchical Summarization**: Detects isolated or old observations, has them summarized by a local LLM (Ollama), and creates a new `ExecutiveSummary` node. Old fragments are deleted to reduce noise while preserving knowledge.
+  - **Automated Session Compression**: Automatically identifies inactive sessions, summarizes their activity into a few bullet points, and stores the summary in the User Profile while marking the session as archived.
 
 **Before Janitor:**
 ```

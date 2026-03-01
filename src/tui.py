@@ -103,7 +103,7 @@ class CozoMemoryTUI(App):
             # Sidebar with navigation
             with Vertical(id="sidebar"):
                 yield Static("🧠 CozoDB Memory", classes="info")
-                yield Button("📊 System Health", id="btn-health", variant="primary")
+                yield Button("⚙️ System Tools", id="btn-system", variant="primary")
                 yield Button("👤 User Profile", id="btn-profile")
                 yield Button("➕ Create Entity", id="btn-create-entity")
                 yield Button("🔍 Search", id="btn-search")
@@ -192,6 +192,20 @@ class CozoMemoryTUI(App):
         result = self._run_cli_command("system", "health")
         self._update_result(result)
     
+    async def action_system_menu(self) -> None:
+        """Show system operations menu"""
+        self.query_one("#welcome-text", Static).update("⚙️ System Tools")
+        
+        container = self.query_one("#result-container", Container)
+        await container.remove_children()
+        
+        await container.mount(
+            Static("Select a system operation:", classes="info"),
+            Button("📊 System Health", id="btn-sys-health"),
+            Button("📈 System Metrics", id="btn-sys-metrics"),
+            Button("🤔 Reflect (Self-Improvement)", id="btn-sys-reflect")
+        )
+    
     async def action_create_entity(self) -> None:
         """Show create entity form"""
         self.query_one("#welcome-text", Static).update("➕ Create Entity")
@@ -222,8 +236,10 @@ class CozoMemoryTUI(App):
             Input(placeholder="Enter search query", id="input-search-query"),
             Label("Limit (optional):"),
             Input(placeholder="10", id="input-search-limit"),
-            Button("Search", id="btn-submit-search", variant="primary")
+            Button("Standard Search", id="btn-submit-search", variant="primary"),
+            Button("🤖 Agentic Search", id="btn-submit-agentic", variant="success")
         )
+
     
     async def action_graph_menu(self) -> None:
         """Show graph operations menu"""
@@ -236,6 +252,7 @@ class CozoMemoryTUI(App):
             Static("Select a graph operation:", classes="info"),
             Button("📊 PageRank", id="btn-graph-pagerank"),
             Button("🏘️ Communities", id="btn-graph-communities"),
+            Button("📝 Summarize Communities", id="btn-graph-summarize"),
             Button("🔍 Explore from Entity", id="btn-graph-explore")
         )
     
@@ -312,8 +329,8 @@ class CozoMemoryTUI(App):
         button_id = event.button.id
         
         # Main menu buttons
-        if button_id == "btn-health":
-            await self.action_show_health()
+        if button_id == "btn-system":
+            await self.action_system_menu()
         elif button_id == "btn-profile":
             await self.action_profile_menu()
         elif button_id == "btn-create-entity":
@@ -328,7 +345,15 @@ class CozoMemoryTUI(App):
             await self.action_import_menu()
         elif button_id == "btn-list":
             await self.action_list_entities()
-        
+            
+        # System submenu buttons
+        elif button_id == "btn-sys-health":
+            await self.action_show_health()
+        elif button_id == "btn-sys-metrics":
+            await self.handle_sys_metrics()
+        elif button_id == "btn-sys-reflect":
+            await self.action_sys_reflect_form()
+            
         # Profile submenu buttons
         elif button_id == "btn-profile-show":
             await self.handle_profile_show()
@@ -350,12 +375,18 @@ class CozoMemoryTUI(App):
             await self.handle_profile_add_pref()
         elif button_id == "btn-submit-import":
             await self.handle_import()
+        elif button_id == "btn-submit-agentic":
+            await self.handle_agentic_search()
+        elif button_id == "btn-submit-reflect":
+            await self.handle_sys_reflect()
         
         # Graph operation buttons
         elif button_id == "btn-graph-pagerank":
             await self.handle_graph_pagerank()
         elif button_id == "btn-graph-communities":
             await self.handle_graph_communities()
+        elif button_id == "btn-graph-summarize":
+            await self.handle_graph_summarize()
         elif button_id == "btn-graph-explore":
             await self.handle_graph_explore_form()
         
@@ -403,6 +434,23 @@ class CozoMemoryTUI(App):
         
         result = self._run_cli_command(*args)
         self._update_result(result)
+
+    async def handle_agentic_search(self) -> None:
+        """Handle agentic search form submission"""
+        query = self.query_one("#input-search-query", Input).value
+        limit = self.query_one("#input-search-limit", Input).value
+        
+        if not query:
+            self._update_result({"error": "Search query is required"})
+            return
+        
+        args = ["search", "agentic", "-q", query]
+        if limit:
+            args.extend(["-l", limit])
+        
+        self.query_one("#welcome-text", Static).update("🤖 Agentic Search Running...")
+        result = self._run_cli_command(*args)
+        self._update_result(result)
     
     async def handle_import(self) -> None:
         """Handle import form submission"""
@@ -428,6 +476,12 @@ class CozoMemoryTUI(App):
         """Execute community detection"""
         self.query_one("#welcome-text", Static).update("🏘️ Detecting Communities...")
         result = self._run_cli_command("graph", "communities")
+        self._update_result(result)
+        
+    async def handle_graph_summarize(self) -> None:
+        """Execute community summarization"""
+        self.query_one("#welcome-text", Static).update("📝 Summarizing Communities (GraphRAG)...")
+        result = self._run_cli_command("graph", "summarize")
         self._update_result(result)
     
     async def handle_graph_explore_form(self) -> None:
@@ -456,6 +510,37 @@ class CozoMemoryTUI(App):
         if hops:
             args.extend(["-h", hops])
         
+        result = self._run_cli_command(*args)
+        self._update_result(result)
+        
+    async def handle_sys_metrics(self) -> None:
+        """Show system metrics"""
+        self.query_one("#welcome-text", Static).update("📈 System Metrics")
+        result = self._run_cli_command("system", "metrics")
+        self._update_result(result)
+        
+    async def action_sys_reflect_form(self) -> None:
+        """Show system reflect form"""
+        self.query_one("#welcome-text", Static).update("🤔 Reflect (Self-Improvement)")
+        
+        container = self.query_one("#result-container", Container)
+        await container.remove_children()
+        
+        await container.mount(
+            Label("Entity ID (optional, leave blank for global reflection):"),
+            Input(placeholder="Enter entity ID", id="input-reflect-id"),
+            Button("Run Reflection", id="btn-submit-reflect", variant="primary")
+        )
+        
+    async def handle_sys_reflect(self) -> None:
+        """Handle system reflect submission"""
+        entity_id = self.query_one("#input-reflect-id", Input).value
+        
+        args = ["system", "reflect"]
+        if entity_id:
+            args.extend(["-i", entity_id])
+            
+        self.query_one("#welcome-text", Static).update("🤔 Running Reflection...")
         result = self._run_cli_command(*args)
         self._update_result(result)
     

@@ -186,6 +186,23 @@ search
     }
   });
 
+search
+  .command('agentic')
+  .description('Perform agentic retrieval with automatic routing')
+  .requiredOption('-q, --query <query>', 'Search query')
+  .option('-l, --limit <number>', 'Result limit', parseInt, 10)
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.agenticSearch(options.query, options.limit);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 // Graph commands
 const graph = program.command('graph').description('Graph operations');
 
@@ -244,6 +261,23 @@ graph
     }
   });
 
+graph
+  .command('summarize')
+  .description('Generate hierarchical community summaries (GraphRAG)')
+  .option('-m, --model <model>', 'LLM model to use for summaries')
+  .option('--min-size <number>', 'Minimum community size', parseInt)
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.summarizeCommunities(options.model, options.minSize);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 // System commands
 const system = program.command('system').alias('sys').description('System operations');
 
@@ -277,6 +311,24 @@ system
     }
   });
 
+system
+  .command('reflect')
+  .description('Perform self-reflection to discover implicit relations')
+  .option('-i, --id <id>', 'Entity ID to reflect on (optional)')
+  .option('-m, --model <model>', 'LLM model to use')
+  .option('--mode <mode>', 'Reflection mode (summary|discovery)', 'discovery')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.reflect(options.id, options.model, options.mode as any);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
 // Export/Import commands
 const exportCmd = program.command('export').description('Export memory');
 
@@ -295,9 +347,9 @@ exportCmd
         includeRelationships: options.includeRelationships,
         includeObservations: options.includeObservations
       });
-      
+
       const jsonData = typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2);
-      
+
       if (options.output) {
         fs.writeFileSync(options.output, jsonData);
         console.log(chalk.green(`✓ Exported to ${options.output}`));
@@ -318,7 +370,7 @@ exportCmd
     try {
       await cli.init();
       const result = await cli.exportMemory('markdown');
-      
+
       if (options.output) {
         fs.writeFileSync(options.output, result.data);
         console.log(chalk.green(`✓ Exported to ${options.output}`));
@@ -339,13 +391,13 @@ exportCmd
     try {
       await cli.init();
       const result = await cli.exportMemory('obsidian');
-      
+
       // Obsidian export returns zipBuffer, not data
       const buffer = result.zipBuffer || result.data;
       if (!buffer) {
         throw new Error('No buffer returned from export');
       }
-      
+
       fs.writeFileSync(options.output, buffer);
       console.log(chalk.green(`✓ Exported to ${options.output}`));
       await cli.close();
@@ -483,6 +535,81 @@ profile
         clear_observations: true,
         observations
       });
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// Session commands
+const session = program.command('session').description('Session management');
+
+session
+  .command('start')
+  .description('Start a new session')
+  .option('-n, --name <name>', 'Session name')
+  .option('-m, --metadata <json>', 'Metadata as JSON string')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const metadata = options.metadata ? JSON.parse(options.metadata) : undefined;
+      const result = await cli.startSession(options.name, metadata);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+session
+  .command('stop')
+  .description('Stop a session')
+  .requiredOption('-i, --id <id>', 'Session ID')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.stopSession(options.id);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// Task commands
+const task = program.command('task').description('Task management');
+
+task
+  .command('start')
+  .description('Start a new task')
+  .requiredOption('-n, --name <name>', 'Task name')
+  .option('-s, --session-id <id>', 'Session ID')
+  .option('-m, --metadata <json>', 'Metadata as JSON string')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const metadata = options.metadata ? JSON.parse(options.metadata) : undefined;
+      const result = await cli.startTask(options.name, options.sessionId, metadata);
+      formatOutput(result, options.format);
+      await cli.close();
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+task
+  .command('stop')
+  .description('Stop a task')
+  .requiredOption('-i, --id <id>', 'Task ID')
+  .option('-f, --format <format>', 'Output format (json|pretty)', 'pretty')
+  .action(async (options) => {
+    try {
+      await cli.init();
+      const result = await cli.stopTask(options.id);
       formatOutput(result, options.format);
       await cli.close();
     } catch (error) {

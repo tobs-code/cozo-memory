@@ -28,14 +28,14 @@ export class CLICommands {
   async createEntity(name: string, type: string, metadata?: Record<string, any>): Promise<any> {
     const { v4: uuidv4 } = await import('uuid');
     const id = uuidv4();
-    
+
     const content = name + " " + type;
     const embedding = await this.server.embeddingService.embed(content);
     const nameEmbedding = await this.server.embeddingService.embed(name);
-    
+
     const now = Date.now() * 1000; // microseconds
     const nowIso = new Date().toISOString();
-    
+
     await this.server.db.run(
       `
         ?[id, created_at, name, type, embedding, name_embedding, metadata] <- [
@@ -44,7 +44,7 @@ export class CLICommands {
       `,
       { id, name, type, metadata: metadata || {} }
     );
-    
+
     return { id, name, type, metadata, created_at: now, created_at_iso: nowIso, status: "Entity created" };
   }
 
@@ -53,16 +53,16 @@ export class CLICommands {
       '?[id, name, type, metadata, ts] := *entity{id, name, type, metadata, created_at, @ "NOW"}, id = $id, ts = to_int(created_at)',
       { id: entityId }
     );
-    
+
     if (entityRes.rows.length === 0) {
       throw new Error("Entity not found");
     }
-    
+
     const obsRes = await this.server.db.run(
       '?[id, text, metadata, ts] := *observation{id, entity_id, text, metadata, created_at, @ "NOW"}, entity_id = $id, ts = to_int(created_at)',
       { id: entityId }
     );
-    
+
     const relRes = await this.server.db.run(
       `
         ?[target_id, type, strength, metadata, direction] := *relationship{from_id, to_id, relation_type: type, strength, metadata, @ "NOW"}, from_id = $id, target_id = to_id, direction = 'outgoing'
@@ -94,23 +94,23 @@ export class CLICommands {
       `,
       { target_id: entityId }
     );
-    
+
     return { status: "Entity and related data deleted" };
   }
 
   // Observation operations
   async addObservation(
-    entityId: string, 
-    text: string, 
+    entityId: string,
+    text: string,
     metadata?: Record<string, any>
   ): Promise<any> {
     const { v4: uuidv4 } = await import('uuid');
     const id = uuidv4();
-    
+
     const embedding = await this.server.embeddingService.embed(text);
     const now = Date.now() * 1000;
     const nowIso = new Date().toISOString();
-    
+
     await this.server.db.run(
       `
         ?[id, created_at, entity_id, text, embedding, metadata] <- [
@@ -119,7 +119,7 @@ export class CLICommands {
       `,
       { id, entity_id: entityId, text, metadata: metadata || {} }
     );
-    
+
     return { id, entity_id: entityId, text, metadata, created_at: now, created_at_iso: nowIso, status: "Observation added" };
   }
 
@@ -134,7 +134,7 @@ export class CLICommands {
     const str = strength !== undefined ? strength : 1.0;
     const now = Date.now() * 1000;
     const nowIso = new Date().toISOString();
-    
+
     await this.server.db.run(
       `
         ?[from_id, to_id, relation_type, created_at, strength, metadata] <- [
@@ -143,7 +143,7 @@ export class CLICommands {
       `,
       { from_id: fromId, to_id: toId, relation_type: relationType, strength: str, metadata: metadata || {} }
     );
-    
+
     return { from_id: fromId, to_id: toId, relation_type: relationType, strength: str, metadata, created_at: now, created_at_iso: nowIso, status: "Relation created" };
   }
 
@@ -163,13 +163,20 @@ export class CLICommands {
       includeEntities,
       includeObservations
     });
-    
+
     // If result is empty or has issues, return it as-is
     return result;
   }
 
   async advancedSearch(params: any): Promise<any> {
     return await this.server.advancedSearch(params);
+  }
+
+  async agenticSearch(query: string, limit?: number): Promise<any> {
+    return await this.server.hybridSearch.agenticRetrieve({
+      query,
+      limit: limit || 10
+    });
   }
 
   async context(query: string, contextWindow?: number, timeRangeHours?: number): Promise<any> {
@@ -216,12 +223,19 @@ export class CLICommands {
     return await this.server.recomputeCommunities();
   }
 
+  async summarizeCommunities(model?: string, minCommunitySize?: number): Promise<any> {
+    return await this.server.summarizeCommunities({
+      model,
+      min_community_size: minCommunitySize
+    });
+  }
+
   // System operations
   async health(): Promise<any> {
     const entityCount = await this.server.db.run('?[count(id)] := *entity{id, @ "NOW"}');
     const obsCount = await this.server.db.run('?[count(id)] := *observation{id, @ "NOW"}');
     const relCount = await this.server.db.run('?[count(from_id)] := *relationship{from_id, @ "NOW"}');
-    
+
     return {
       status: "healthy",
       entities: entityCount.rows[0][0],
@@ -235,18 +249,26 @@ export class CLICommands {
     return (this.server as any).metrics;
   }
 
+  async reflect(entityId?: string, model?: string, mode?: 'summary' | 'discovery'): Promise<any> {
+    return await this.server.reflectMemory({
+      entity_id: entityId,
+      model,
+      mode
+    });
+  }
+
   async exportMemory(format: 'json' | 'markdown' | 'obsidian', options?: any): Promise<any> {
     const { ExportImportService } = await import('./export-import-service.js');
-    
+
     // Create a simple wrapper that implements DbService interface
     const dbService = {
       run: async (query: string, params?: any) => {
         return await this.server.db.run(query, params);
       }
     };
-    
+
     const exportService = new ExportImportService(dbService);
-    
+
     return await exportService.exportMemory({
       format,
       includeMetadata: options?.includeMetadata,
@@ -259,16 +281,16 @@ export class CLICommands {
 
   async importMemory(data: any, sourceFormat: string, options?: any): Promise<any> {
     const { ExportImportService } = await import('./export-import-service.js');
-    
+
     // Create a simple wrapper that implements DbService interface
     const dbService = {
       run: async (query: string, params?: any) => {
         return await this.server.db.run(query, params);
       }
     };
-    
+
     const exportService = new ExportImportService(dbService);
-    
+
     return await exportService.importMemory(data, {
       sourceFormat: sourceFormat as any,
       mergeStrategy: options?.mergeStrategy || 'skip',
@@ -300,5 +322,22 @@ export class CLICommands {
 
   async getUserProfile(): Promise<any> {
     return await this.server.editUserProfile({});
+  }
+
+  // Session and Task management
+  async startSession(name?: string, metadata?: any): Promise<any> {
+    return await this.server.startSession({ name, metadata });
+  }
+
+  async stopSession(id: string): Promise<any> {
+    return await this.server.stopSession({ id });
+  }
+
+  async startTask(name: string, sessionId?: string, metadata?: any): Promise<any> {
+    return await this.server.startTask({ name, session_id: sessionId, metadata });
+  }
+
+  async stopTask(id: string): Promise<any> {
+    return await this.server.stopTask({ id });
   }
 }

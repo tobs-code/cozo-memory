@@ -32,6 +32,8 @@ export interface HybridSearchOptions {
   inferenceWeight?: number;
   timeRangeHours?: number;
   rerank?: boolean;
+  session_id?: string;
+  task_id?: string;
 }
 
 export interface AdvancedHybridQueryOptions extends HybridSearchOptions {
@@ -134,6 +136,41 @@ export class HybridSearch {
         return { ...r, score: newScore };
       }
       return { ...r, score };
+    });
+  }
+
+  private applyContextBoost(results: SearchResult[], options: HybridSearchOptions): SearchResult[] {
+    const { session_id, task_id } = options;
+    if (!session_id && !task_id) return results;
+
+    return results.map(result => {
+      let boost = 1.0;
+      let reasons: string[] = [];
+
+      const metadata = result.metadata || {};
+
+      if (task_id && metadata.task_id === task_id) {
+        boost += 0.5;
+        reasons.push("Task Match");
+      }
+
+      if (session_id && metadata.session_id === session_id) {
+        boost += 0.3;
+        reasons.push("Session Match");
+      }
+
+      if (boost > 1.0) {
+        // Cap the score at 1.0 to stay within standard search score range
+        const newScore = Math.min(1.0, result.score * boost);
+        return {
+          ...result,
+          score: newScore,
+          explanation: (typeof result.explanation === 'string' ? result.explanation : JSON.stringify(result.explanation)) +
+            ` | Context Boost (x${boost.toFixed(1)}): ${reasons.join(', ')}`
+        };
+      }
+
+      return result;
     });
   }
 
@@ -300,11 +337,6 @@ export class HybridSearch {
       `:limit $limit`
     ].join('\n').trim();
 
-    console.error('--- DEBUG: Cozo Datalog Query ---');
-    console.error(datalogQuery);
-    console.error('--- DEBUG: Params ---');
-    console.error(JSON.stringify(params, null, 2));
-
     try {
       const results = await this.db.run(datalogQuery, params);
       let searchResults: SearchResult[] = results.rows.map((r: any) => ({
@@ -333,7 +365,8 @@ export class HybridSearch {
         });
       }
 
-      const finalResults = this.applyTimeDecay(searchResults);
+      const timeDecayedResults = this.applyTimeDecay(searchResults);
+      const finalResults = this.applyContextBoost(timeDecayedResults, options);
 
       // Phase 3: Reranking
       if (options.rerank) {
@@ -440,8 +473,6 @@ export class HybridSearch {
       :sort -score
       :limit $limit
     `.trim();
-
-    console.error("[HybridSearch] Graph-RAG Datalog Query:\n", datalogQuery);
 
     try {
       const results = await this.db.run(datalogQuery, params);

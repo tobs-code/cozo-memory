@@ -60,6 +60,8 @@ npm run start
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.
 
+🧠 **Multi-Level Memory (v2.0)** - Kontext-bewusstes Memory-System mit integriertem Session- und Task-Management.
+
 🎯 **Tiny Learned Reranker (v2.0)** - Integriertes Cross-Encoder Modell (`ms-marco-MiniLM-L-6-v2`) für ultra-präzises Re-Ranking der Top-Suchergebnisse.
 
 🎯 **Multi-Vector Support (seit v1.7)** - Duale Embeddings pro Entity: Content-Embedding für Kontext, Name-Embedding für Identifikation
@@ -301,6 +303,53 @@ Standard-Datenbankpfad: `memory_db.cozo.db` im Projektroot (wird automatisch ang
     }
   }
 }
+```
+
+### CLI-Tool
+
+CozoDB Memory enthält ein vollwertiges CLI für alle Operationen:
+
+```bash
+# System-Operationen
+cozo-memory system health
+cozo-memory system metrics
+cozo-memory system reflect
+
+# Entitäts-Operationen
+cozo-memory entity create -n "MyEntity" -t "person" -m '{"age": 30}'
+cozo-memory entity get -i <entity-id>
+cozo-memory entity delete -i <entity-id>
+
+# Beobachtungen (Observations)
+cozo-memory observation add -i <entity-id> -t "Notiz"
+
+# Beziehungen (Relations)
+cozo-memory relation create --from <id1> --to <id2> --type "knows" -s 0.8
+
+# Suche
+cozo-memory search query -q "Suchbegriff" -l 10
+cozo-memory search context -q "Kontext-Abfrage"
+cozo-memory search agentic -q "Agentic-Suche"
+
+# Graph-Operationen
+cozo-memory graph explore -s <entity-id> -h 3
+cozo-memory graph pagerank
+cozo-memory graph communities
+cozo-memory graph summarize
+
+# Session- & Task-Management
+cozo-memory session start -n "Meine Session"
+cozo-memory session stop -i <session-id>
+cozo-memory task start -n "Mein Task" -s <session-id>
+cozo-memory task stop -i <task-id>
+
+# Export/Import
+cozo-memory export json -o backup.json --include-metadata --include-relationships --include-observations
+cozo-memory export markdown -o notes.md
+cozo-memory export obsidian -o vault.zip
+cozo-memory import file -i data.json -f cozo
+
+# Alle Befehle unterstützen -f json oder -f pretty für die Formatierung
 ```
 
 ## Konfiguration & Backends
