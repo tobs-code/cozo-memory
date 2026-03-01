@@ -81,6 +81,8 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🧹 **Janitor Service** - LLM-backed automatic cleanup with hierarchical summarization, observation pruning, and **automated session compression**
 
+🗜️ **Context Compaction & Auto-Summarization (v2.2)** - Automatic and manual memory consolidation with progressive summarization and LLM-backed Executive Summaries
+
 🧠 **Fact Lifecycle Management (v2.1)** - Native "soft-deletion" via CozoDB Validity retraction; invalidated facts are hidden from current views but preserved in history for audit trails
 
 👤 **User Preference Profiling** - Persistent user preferences with automatic 50% search boost
@@ -532,7 +534,7 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
-| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
+| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory, compact |
 
 ### mutate_memory (Write)
 
@@ -736,6 +738,10 @@ Actions:
 - `snapshot_list`: `{}`
 - `snapshot_diff`: `{ snapshot_id_a, snapshot_id_b }`
 - `cleanup`: `{ confirm, older_than_days?, max_observations?, min_entity_degree?, model? }`
+- `compact`: `{ session_id?, entity_id?, model? }` **(New v2.2)**: Manual context compaction. Supports three modes:
+  - **Session Compaction**: `{ session_id, model? }` - Summarizes session observations into 2-3 bullet points and stores in user profile
+  - **Entity Compaction**: `{ entity_id, model? }` - Compacts entity observations when threshold exceeded, creates Executive Summary
+  - **Global Compaction**: `{}` (no parameters) - Compacts all entities exceeding threshold (default: 20 observations)
 - `summarize_communities`: `{ model?, min_community_size? }` **(New v2.0)**: Triggers the **Hierarchical GraphRAG** pipeline. Recomputes communities, generates thematic summaries via LLM, and stores them as `CommunitySummary` entities.
 - `reflect`: `{ entity_id?, mode?, model? }` Analyzes memory for contradictions and new insights. Supports `summary` (default) and `discovery` (autonomous link refinement) modes.
 - `clear_memory`: `{ confirm }`
@@ -745,6 +751,17 @@ Janitor Cleanup Details:
 - With `confirm: true`, the Janitor becomes active:
   - **Hierarchical Summarization**: Detects isolated or old observations, has them summarized by a local LLM (Ollama), and creates a new `ExecutiveSummary` node. Old fragments are deleted to reduce noise while preserving knowledge.
   - **Automated Session Compression**: Automatically identifies inactive sessions, summarizes their activity into a few bullet points, and stores the summary in the User Profile while marking the session as archived.
+
+Context Compaction Details **(New v2.2)**:
+- **Automatic Compaction**: Triggered automatically when observations exceed threshold (default: 20)
+  - Runs in background during `addObservation`
+  - Uses lock mechanism to prevent concurrent compaction
+- **Manual Compaction**: Available via `compact` action in `manage_system`
+  - **Session Mode**: Summarizes session observations and stores in `global_user_profile`
+  - **Entity Mode**: Compacts specific entity with custom threshold
+  - **Global Mode**: Compacts all entities exceeding threshold
+- **Progressive Summarization**: New observations are merged with existing Executive Summaries instead of simple append
+- **LLM Integration**: Uses Ollama (default model: `demyagent-4b-i1:Q6_K`) for intelligent summarization
 
 **Before Janitor:**
 ```

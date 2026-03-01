@@ -205,93 +205,134 @@ export class InferenceEngine {
     path_score: number;
     path_type: string; // 'explicit', 'semantic', 'mixed'
   }[]> {
-    try {
-      // Get embedding of the start entity for the first semantic jump
-      const entityRes = await this.db.run('?[embedding] := *entity{id: $id, embedding, @ "NOW"}', { id: startEntityId });
-      if (entityRes.rows.length === 0) return [];
-      const startEmbedding = entityRes.rows[0][0];
-
-      // Recursive Datalog query
-      // We avoid complex aggregation of strings in Datalog as this can cause errors.
-      // Instead, we implicitly group by 'type' as well and filter later in JS.
-      const query = `
-        # 1. Start point
-        path[id, depth, score, type] := 
-          id = $startId, 
-          depth = 0, 
-          score = 1.0, 
-          type = 'start'
-
-        # 2. Recursion: Follow explicit relations
-        path[next_id, new_depth, new_score, new_type] :=
-          path[curr_id, depth, score, curr_type],
-          depth < $maxDepth,
-          *relationship{from_id: curr_id, to_id: next_id, relation_type, strength, @ "NOW"},
-          new_depth = depth + 1,
-          new_score = score * strength,
-          new_type = if(curr_type == 'start', 'explicit', if(curr_type == 'explicit', 'explicit', 'mixed'))
-
-        # 3. Recursion: Follow semantic similarity (via HNSW Index)
-        path[next_id, new_depth, new_score, new_type] :=
-          path[curr_id, depth, score, curr_type],
-          depth < $maxDepth,
-          *entity{id: curr_id, embedding: curr_emb, @ "NOW"}, # Load embedding
-          # Search for the K nearest neighbors to the current embedding
-          ~entity:semantic { id: next_id |
-            query: curr_emb,
-            k: 5,
-            ef: 20,
-            bind_distance: dist
-          },
-          next_id != curr_id, # No self-reference
-          sim = 1.0 - dist,
-          sim >= $minSim,
-          new_depth = depth + 1,
-          new_score = score * sim * 0.8, # Penalize semantic jumps slightly (damping)
-          new_type = if(curr_type == 'start', 'semantic', if(curr_type == 'semantic', 'semantic', 'mixed'))
-
-        # Aggregate result (Grouping by ID and Type)
-        ?[id, min_depth, max_score, type] := 
-          path[id, d, s, type],
-          id != $startId,
-          min_depth = min(d),
-          max_score = max(s)
-          :limit 100
-      `;
-
-      const res = await this.db.run(query, {
-        startId: startEntityId,
-        maxDepth: maxDepth,
-        minSim: minSimilarity
-      });
-
-      // Post-processing in JS: Select best path type per ID
-      const bestPaths = new Map<string, any>();
-
-      for (const row of res.rows) {
-        const [id, depth, score, type] = row;
-
-        // Cozo sometimes returns arrays or raw values, ensure we have Strings/Numbers
-        const cleanId = String(id);
-        const cleanDepth = Number(depth);
-        const cleanScore = Number(score);
-        const cleanType = String(type);
-
-        if (!bestPaths.has(cleanId) || cleanScore > bestPaths.get(cleanId).path_score) {
-          bestPaths.set(cleanId, {
-            entity_id: cleanId,
-            distance: cleanDepth,
-            path_score: cleanScore,
-            path_type: cleanType
-          });
-        }
-      }
-
-      return Array.from(bestPaths.values());
-    } catch (e: any) {
-      console.error("Semantic Graph Walk Failed:", e.message);
-      return [];
+    // Limit max_depth to 2 to prevent database lock issues with complex queries
+    const safeMaxDepth = Math.min(maxDepth, 2);
+    if (maxDepth > 2) {
+      console.error(`[SemanticWalk] Limiting max_depth from ${maxDepth} to 2 to prevent database locks`);
     }
+
+    // Retry logic with exponential backoff for database lock errors
+    const maxRetries = 3;
+    const baseDelay = 100; // ms
+    const timeout = 30000; // 30 second timeout
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Wrap in timeout promise
+        const result = await Promise.race([
+          this._executeSemanticWalk(startEntityId, safeMaxDepth, minSimilarity),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Semantic walk timeout')), timeout)
+          )
+        ]);
+        return result;
+      } catch (e: any) {
+        const isLockError = e.message?.includes('database is locked') || e.message?.includes('code 5');
+        const isLastAttempt = attempt === maxRetries - 1;
+
+        if (isLockError && !isLastAttempt) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.error(`[SemanticWalk] Database locked (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        console.error(`[SemanticWalk] Failed after ${attempt + 1} attempts:`, e.message);
+        return [];
+      }
+    }
+
+    return [];
+  }
+
+  private async _executeSemanticWalk(startEntityId: string, maxDepth: number, minSimilarity: number): Promise<{
+    entity_id: string;
+    distance: number;
+    path_score: number;
+    path_type: string;
+  }[]> {
+    // Get embedding of the start entity for the first semantic jump
+    // Optimized: Remove @ "NOW" validity check for better performance
+    const entityRes = await this.db.run('?[embedding] := *entity{id: $id, embedding}', { id: startEntityId });
+    if (entityRes.rows.length === 0) return [];
+    const startEmbedding = entityRes.rows[0][0];
+
+    // Recursive Datalog query - Optimized for performance
+    // Removed @ "NOW" validity checks to reduce lock contention
+    const query = `
+      # 1. Start point
+      path[id, depth, score, type] := 
+        id = $startId, 
+        depth = 0, 
+        score = 1.0, 
+        type = 'start'
+
+      # 2. Recursion: Follow explicit relations (optimized - no validity check)
+      path[next_id, new_depth, new_score, new_type] :=
+        path[curr_id, depth, score, curr_type],
+        depth < $maxDepth,
+        *relationship{from_id: curr_id, to_id: next_id, relation_type, strength},
+        new_depth = depth + 1,
+        new_score = score * strength,
+        new_type = if(curr_type == 'start', 'explicit', if(curr_type == 'explicit', 'explicit', 'mixed'))
+
+      # 3. Recursion: Follow semantic similarity (optimized - no validity check)
+      path[next_id, new_depth, new_score, new_type] :=
+        path[curr_id, depth, score, curr_type],
+        depth < $maxDepth,
+        *entity{id: curr_id, embedding: curr_emb},
+        # Search for the K nearest neighbors to the current embedding
+        ~entity:semantic { id: next_id |
+          query: curr_emb,
+          k: 5,
+          ef: 20,
+          bind_distance: dist
+        },
+        next_id != curr_id,
+        sim = 1.0 - dist,
+        sim >= $minSim,
+        new_depth = depth + 1,
+        new_score = score * sim * 0.8,
+        new_type = if(curr_type == 'start', 'semantic', if(curr_type == 'semantic', 'semantic', 'mixed'))
+
+      # Aggregate result (Grouping by ID and Type)
+      ?[id, min_depth, max_score, type] := 
+        path[id, d, s, type],
+        id != $startId,
+        min_depth = min(d),
+        max_score = max(s)
+        :limit 100
+    `;
+
+    const res = await this.db.run(query, {
+      startId: startEntityId,
+      maxDepth: maxDepth,
+      minSim: minSimilarity
+    });
+
+    // Post-processing in JS: Select best path type per ID
+    const bestPaths = new Map<string, any>();
+
+    for (const row of res.rows) {
+      const [id, depth, score, type] = row;
+
+      // Cozo sometimes returns arrays or raw values, ensure we have Strings/Numbers
+      const cleanId = String(id);
+      const cleanDepth = Number(depth);
+      const cleanScore = Number(score);
+      const cleanType = String(type);
+
+      if (!bestPaths.has(cleanId) || cleanScore > bestPaths.get(cleanId).path_score) {
+        bestPaths.set(cleanId, {
+          entity_id: cleanId,
+          distance: cleanDepth,
+          path_score: cleanScore,
+          path_type: cleanType
+        });
+      }
+    }
+
+    return Array.from(bestPaths.values());
   }
 
   /**

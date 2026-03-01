@@ -25,6 +25,7 @@ export class MemoryServer {
   public hybridSearch: HybridSearch;
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
+  private compactionLocks: Set<string> = new Set();
 
   // Metrics tracking
   private metrics = {
@@ -1568,13 +1569,13 @@ export class MemoryServer {
       if (session_id) {
         try {
           await this.db.run(`
-            ?[id, last_active, status, metadata] :=
-              *session_state{id, metadata},
-              id = $id,
+            ?[session_id, last_active, status, metadata] :=
+              *session_state{session_id, metadata},
+              session_id = $session_id,
               last_active = $now,
               status = "active"
-            :update session_state {id => last_active, status, metadata}
-          `, { id: session_id, now: Math.floor(now / 1000000) });
+            :update session_state {session_id => last_active, status, metadata}
+          `, { session_id: session_id, now: Math.floor(now / 1000000) });
         } catch (e: any) {
           console.warn(`[AddObservation] Session activity update failed for ${session_id}:`, e.message);
         }
@@ -1583,6 +1584,13 @@ export class MemoryServer {
       // Optional: Automatic inference after new observation (in background)
       const suggestionsRaw = await this.inferenceEngine.inferRelations(entityId);
       const suggestions = await this.formatInferredRelationsForContext(suggestionsRaw);
+
+      // Automatic Compaction (Threshold-based)
+      // Skip for compaction-generated observations to prevent recursive loop
+      const metadataKind = args.metadata?.kind;
+      if (metadataKind !== "compaction" && metadataKind !== "session_summary") {
+        this.compactEntity({ entity_id: entityId }).catch(e => console.error(`[AutoCompact] Error for ${entityId}:`, e));
+      }
 
       const created_at_iso = new Date(Math.floor(now / 1000)).toISOString();
       return {
@@ -1623,6 +1631,14 @@ export class MemoryServer {
 
   public async stopSession(args: { id: string }) {
     await this.initPromise;
+
+    // Automatic Session Compaction
+    try {
+      await this.compactSession({ session_id: args.id });
+    } catch (e: any) {
+      console.warn(`[AutoCompact] Session compaction failed for ${args.id}:`, e.message);
+    }
+
     await this.db.run(`
       ?[session_id, last_active, status, metadata] :=
         *session_state{session_id, last_active, metadata},
@@ -2001,9 +2017,9 @@ ids[id] <- $ids
     } else {
       // Select top 5 entities with the most observations
       const res = await this.db.run(`
-        ?[id, name, type, count(id)] := 
-          *entity{id, name, type, @ "NOW"}, 
-          *observation{entity_id: id, @ "NOW"}
+        ?[eid, ename, etype, count(oid)] := 
+          *entity{id: eid, name: ename, type: etype, @ "NOW"}, 
+          *observation{entity_id: eid, id: oid, @ "NOW"}
       `);
       entitiesToReflect = res.rows
         .map((r: any) => ({ id: String(r[0]), name: String(r[1]), type: String(r[2]), count: Number(r[3]) }))
@@ -2070,8 +2086,8 @@ If no special patterns are recognizable, answer with "No new insights".`;
         for (const candidate of candidates) {
           // Check if relationship already exists
           const existing = await this.db.run(`
-            ?[count(from_id)] := *relationship{from_id, to_id, relation_type, @ "NOW"},
-              from_id = $from, to_id = $to, relation_type = $rel
+            ?[count(fid)] := *relationship{from_id: fid, to_id: tid, relation_type: rel, @ "NOW"},
+              fid = $from, tid = $to, rel = $rel
           `, { from: candidate.from_id, to: candidate.to_id, rel: candidate.relation_type });
 
           if (Number(existing.rows[0][0]) > 0) continue;
@@ -2463,6 +2479,148 @@ ids[id] <- $ids
     }
   }
 
+  public async compactSession(args: { session_id: string, model?: string }) {
+    await this.initPromise;
+    const model = args.model || "demyagent-4b-i1:Q6_K";
+    try {
+      // 1. Get all observations from this session
+      const obsRes = await this.db.run('?[text, ts] := *observation{session_id: $sid, text, created_at, @ "NOW"}, ts = to_int(created_at) :order ts', {
+        sid: args.session_id
+      });
+
+      if (obsRes.rows.length < 3) {
+        return { status: "skipped", reason: "Too few observations for session compaction" };
+      }
+
+      const observations = obsRes.rows.map((r: any) => r[0]);
+
+      const systemPrompt = `You are a memory compaction module. Summarize the following session observations into exactly 2-3 concise bullet points. 
+Focus only on core facts, preferences, or important events. Skip conversational filler.
+Format:
+- Bullet Point 1
+- Bullet Point 2
+(- Bullet Point 3)`;
+
+      const userPrompt = `Session ID: ${args.session_id}\n\nObservations:\n${observations.join("\n")}`;
+
+      const response = await this.callOllama(model, systemPrompt, userPrompt);
+      if (!response) throw new Error("Ollama summary failed");
+
+      // 2. Add as preference/long-term info to user profile
+      await this.addObservation({
+        entity_id: USER_ENTITY_ID,
+        text: `Session Summary (${args.session_id}): ${response}`,
+        metadata: { kind: "session_summary", session_id: args.session_id, model },
+        deduplicate: true
+      });
+
+      return { status: "session_compacted", session_id: args.session_id, summary: response };
+    } catch (error: any) {
+      console.error(`[CompactSession] Error:`, error);
+      return { error: error.message };
+    }
+  }
+
+  public async compactEntity(args: { entity_id: string, threshold?: number, model?: string }) {
+    if (this.compactionLocks.has(args.entity_id)) return { status: "already_compacting" };
+    this.compactionLocks.add(args.entity_id);
+    await this.initPromise;
+    const threshold = args.threshold || 20;
+    const model = args.model || "demyagent-4b-i1:Q6_K";
+
+    try {
+      // 1. Check count of active observations
+      const countRes = await this.db.run('?[count(oid)] := *observation{entity_id: $eid, id: oid, @ "NOW"}', { eid: args.entity_id });
+      const currentCount = Number(countRes.rows[0][0]);
+
+      if (currentCount <= threshold) {
+        return { entity_id: args.entity_id, status: "ok", count: currentCount };
+      }
+
+      console.error(`[CompactEntity] Compacting ${args.entity_id} (Count: ${currentCount})`);
+
+      // 2. Get older observations (limit to currentCount - threshold/2 to keep some recent context)
+      const toKeep = Math.floor(threshold / 2);
+      const toCompact = currentCount - toKeep;
+
+      const obsRes = await this.db.run(`
+        ?[oid, txt, ts] := *observation{entity_id: $eid, id: oid, text: txt, created_at, @ "NOW"}, ts = to_int(created_at)
+        :order ts
+        :limit $limit
+      `, { eid: args.entity_id, limit: toCompact });
+
+      if (obsRes.rows.length === 0) return { entity_id: args.entity_id, status: "no_older_obs_found" };
+
+      const idsToInvalidate = obsRes.rows.map((r: any) => String(r[0]));
+      const textsToCompact = obsRes.rows.map((r: any) => r[1]);
+
+      // 3. Check for existing ExecutiveSummary
+      const existingSummaryRes = await this.db.run('?[sid, stxt] := *observation{entity_id: $eid, text: stxt, id: sid, @ "NOW"}, regex_matches(stxt, "(?i).*(Executive\\s*Summary|ExecutiveSummary).*") :limit 1', { eid: args.entity_id });
+
+      let summaryText = "";
+      let oldSummaryId = "";
+      if (existingSummaryRes.rows.length > 0) {
+        oldSummaryId = String(existingSummaryRes.rows[0][0]);
+        summaryText = String(existingSummaryRes.rows[0][1]).replace(/Executive\s*Summary:\s*/i, "").replace(/ExecutiveSummary:\s*/i, "");
+        console.error(`[CompactEntity] Found existing summary to merge: ${oldSummaryId}`);
+      }
+
+      // 4. Summarize / Merge
+      const systemPrompt = `You are a memory compaction module. You are maintaining an "Executive Summary" for an entity.
+Merge the NEW observations into the EXISTING summary (if present). 
+The summary should be dense, data-rich, and capture all relevant historical facts.
+Keep it structured and concise (max 5-8 sentences).
+Format MUST start with "ExecutiveSummary: " followed by the consolidated content.`;
+
+      const userPrompt = `Entity ID: ${args.entity_id}\nExisting Summary: ${summaryText || "None"}\n\nNew Info to integrate:\n${textsToCompact.join("\n")}`;
+
+      console.error(`[CompactEntity] Calling Ollama for ${idsToInvalidate.length} observations...`);
+      const newSummaryText = await this.callOllama(model, systemPrompt, userPrompt);
+      if (!newSummaryText) throw new Error("Ollama compaction failed");
+
+      // 5. Atomic Update
+      // a) Invalidate old observations
+      for (const oid of idsToInvalidate) {
+        await this.invalidateObservation({ observation_id: oid });
+      }
+      // b) Invalidate old summary if exists
+      if (oldSummaryId) {
+        await this.invalidateObservation({ observation_id: oldSummaryId });
+      }
+      // c) Add new summary
+      await this.addObservation({
+        entity_id: args.entity_id,
+        text: newSummaryText,
+        metadata: { kind: "compaction", model, compacted_count: idsToInvalidate.length }
+      });
+
+      return { status: "entity_compacted", entity_id: args.entity_id, observations_compacted: idsToInvalidate.length };
+    } catch (error: any) {
+      console.error(`[CompactEntity] Error for ${args.entity_id}:`, error);
+      return { error: error.message };
+    } finally {
+      this.compactionLocks.delete(args.entity_id);
+    }
+  }
+
+  private async callOllama(model: string, system: string, user: string): Promise<string | null> {
+    try {
+      const ollamaMod: any = await import("ollama");
+      const ollamaClient: any = ollamaMod?.default ?? ollamaMod;
+      const response = await ollamaClient.chat({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      return (response as any)?.message?.content?.trim?.() ?? null;
+    } catch (e) {
+      console.error(`[OllamaCall] Error:`, e);
+      return null;
+    }
+  }
+
   public async deleteEntity(args: { entity_id: string }) {
     const startTime = Date.now();
     try {
@@ -2478,9 +2636,9 @@ ids[id] <- $ids
       console.error(`[Delete] Entity found: ${entityRes.rows[0][0]}`);
 
       // 2. Count related data before deletion
-      const obsCount = await this.db.run('?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $id', { id: args.entity_id });
-      const relOutCount = await this.db.run('?[count(from_id)] := *relationship{from_id, to_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
-      const relInCount = await this.db.run('?[count(to_id)] := *relationship{from_id, to_id, @ "NOW"}, to_id = $id', { id: args.entity_id });
+      const obsCount = await this.db.run('?[count(oid)] := *observation{id: oid, entity_id: $id, @ "NOW"}', { id: args.entity_id });
+      const relOutCount = await this.db.run('?[count(fid)] := *relationship{from_id: fid, to_id, @ "NOW"}, from_id = $id', { id: args.entity_id });
+      const relInCount = await this.db.run('?[count(tid)] := *relationship{from_id, to_id: tid, @ "NOW"}, to_id = $id', { id: args.entity_id });
 
       console.error(`[Delete] Related data: ${obsCount.rows[0][0]} observations, ${relOutCount.rows[0][0]} outgoing relations, ${relInCount.rows[0][0]} incoming relations`);
 
@@ -2529,7 +2687,7 @@ ids[id] <- $ids
     try {
       const now = Date.now() * 1000;
       // Invalidate by putting a retraction (assertive=false) at current time
-      const existing = await this.db.run(`?[id, entity_id, session_id, task_id, text, embedding, metadata] := *observation{id, entity_id, session_id, task_id, text, embedding, metadata, @ "NOW"}, id = $id`, { id: args.observation_id });
+      const existing = await this.db.run(`?[oid, eid, sid, tid, txt, emb, meta] := *observation{id: oid, entity_id: eid, session_id: sid, task_id: tid, text: txt, embedding: emb, metadata: meta, @ "NOW"}, oid = $id`, { id: args.observation_id });
 
       if (existing.rows.length === 0) {
         return { error: "Observation not found or already invalidated" };
@@ -2836,10 +2994,10 @@ ids[id] <- $ids
 
             statements.push(`
               {
-                ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] := 
-                  *observation{id, entity_id, session_id, task_id, text, embedding, metadata, @ "NOW"}, 
-                  id = $inv_obs_id${suffix}, created_at = $inv_obs_v${suffix}
-                :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
+                ?[oid, cat, eid, sid, tid, txt, emb, meta] := 
+                  *observation{id: oid, entity_id: eid, session_id: sid, task_id: tid, text: txt, embedding: emb, metadata: meta, @ "NOW"}, 
+                  oid = $inv_obs_id${suffix}, cat = $inv_obs_v${suffix}
+                :put observation {id: oid, created_at: cat => entity_id: eid, session_id: sid, task_id: tid, text: txt, embedding: emb, metadata: meta}
               }
             `);
             results.push({ action: "invalidate_observation", id: observation_id });
@@ -2859,10 +3017,10 @@ ids[id] <- $ids
 
             statements.push(`
               {
-                ?[from_id, to_id, relation_type, created_at, strength, metadata] := 
-                  *relationship{from_id, to_id, relation_type, strength, metadata, @ "NOW"}, 
-                  from_id = $inv_rel_f${suffix}, to_id = $inv_rel_t${suffix}, relation_type = $inv_rel_type${suffix}, created_at = $inv_rel_v${suffix}
-                :put relationship {from_id, to_id, relation_type, created_at => strength, metadata}
+                ?[f, t, type, cat, str, meta] := 
+                  *relationship{from_id: f, to_id: t, relation_type: type, strength: str, metadata: meta, @ "NOW"}, 
+                  f = $inv_rel_f${suffix}, t = $inv_rel_t${suffix}, type = $inv_rel_type${suffix}, cat = $inv_rel_v${suffix}
+                :put relationship {from_id: f, to_id: t, relation_type: type, created_at: cat => strength: str, metadata: meta}
               }
             `);
             results.push({ action: "invalidate_relation", from_id, to_id, relation_type });
@@ -3244,7 +3402,7 @@ ids[id] <- $ids
 
     const MutateMemoryParameters = z.object({
       action: z
-        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task"])
+        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task", "invalidate_observation", "invalidate_relation"])
         .describe("Action (determines which fields are required)"),
       name: z.string().optional().describe("For create_entity (required) or add_inference_rule (required)"),
       type: z.string().optional().describe("For create_entity (required)"),
@@ -3266,6 +3424,7 @@ ids[id] <- $ids
       relation_type: z.string().optional().describe("For create_relation (required)"),
       strength: z.number().min(0).max(1).optional().describe("Optional for create_relation"),
       metadata: MetadataSchema.optional().describe("Optional for create_entity/update_entity/add_observation/create_relation/ingest_file"),
+      observation_id: z.string().optional().describe("For invalidate_observation (required)"),
       operations: z.array(z.object({
         action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity"]),
         params: z.any().describe("Parameters for the operation as an object")
@@ -4199,11 +4358,17 @@ Supported actions:
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
         min_community_size: z.number().min(2).max(100).optional().default(3),
       }),
+      z.object({
+        action: z.literal("compact"),
+        session_id: z.string().optional().describe("Session ID to compact"),
+        entity_id: z.string().optional().describe("Entity ID to compact"),
+        model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
+      }),
     ]);
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory", "summarize_communities"])
+        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory", "summarize_communities", "compact"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -4350,9 +4515,9 @@ Supported actions:
         if (input.action === "snapshot_create") {
           try {
             // Optimization: Sequential execution and count aggregation instead of full fetch
-            const entityResult = await this.db.run('?[count(id)] := *entity{id, @ "NOW"}');
-            const obsResult = await this.db.run('?[count(id)] := *observation{id, @ "NOW"}');
-            const relResult = await this.db.run('?[count(from_id)] := *relationship{from_id, to_id, @ "NOW"}');
+            const entityResult = await this.db.run('?[count(eid)] := *entity{id: eid, @ "NOW"}');
+            const obsResult = await this.db.run('?[count(oid)] := *observation{id: oid, @ "NOW"}');
+            const relResult = await this.db.run('?[count(fid)] := *relationship{from_id: fid, to_id, @ "NOW"}');
 
             const snapshot_id = uuidv4();
             const counts = {
@@ -4502,6 +4667,33 @@ Supported actions:
             return JSON.stringify({ status: "Memory completely cleared" });
           } catch (error: any) {
             return JSON.stringify({ error: error.message || "Error clearing memory" });
+          }
+        }
+
+        if (input.action === "compact") {
+          try {
+            if (input.session_id) {
+              return JSON.stringify(await this.compactSession({ session_id: input.session_id, model: input.model }));
+            } else if (input.entity_id) {
+              return JSON.stringify(await this.compactEntity({ entity_id: input.entity_id, model: input.model }));
+            } else {
+              // Compact all entities that exceed threshold
+              const res = await this.db.run(`
+                ?[eid, count(oid)] := *observation{entity_id: eid, id: oid, @ "NOW"}
+              `);
+              const threshold = 20;
+              const entitiesToCompact = res.rows
+                .filter((r: any) => Number(r[1]) > threshold)
+                .map((r: any) => String(r[0]));
+
+              const results = [];
+              for (const eid of entitiesToCompact) {
+                results.push(await this.compactEntity({ entity_id: eid, model: input.model }));
+              }
+              return JSON.stringify({ status: "global_compaction_completed", entities_processed: results.length, results });
+            }
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error during compaction" });
           }
         }
 

@@ -76,7 +76,9 @@ npm run start
 
 🏗️ **Hierarchical GraphRAG (v2.0)** - Automatische Generierung thematischer "Community Summaries" mittels lokaler LLMs für globales "Big Picture" Reasoning.
 
-🧹 **Janitor-Service** - LLM-gestützte automatische Bereinigung mit hierarchischer Summarization und Observation-Pruning.
+🧹 **Janitor-Service** - LLM-gestützte automatische Bereinigung mit hierarchischer Summarization, Observation-Pruning und **automatischer Session-Komprimierung**.
+
+🗜️ **Kontext-Kompaktierung & Auto-Summarization (v2.2)** - Automatische und manuelle Memory-Konsolidierung mit progressiver Summarization und LLM-gestützten Executive Summaries.
 
 🧠 **Fact Lifecycle Management (v2.1)** - Natives „Soft-Deletion“ via CozoDB Validity Retraction; ungültige Fakten werden aus aktuellen Sichten ausgeblendet, bleiben aber in der Historie für Audits erhalten.
 
@@ -404,7 +406,7 @@ Die Oberfläche ist auf **4 konsolidierte Tools** reduziert. Die konkrete Operat
 | `mutate_memory` | Schreiboperationen | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Leseoperationen | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search |
 | `analyze_graph` | Graph-Analyse | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
-| `manage_system` | Wartung | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory |
+| `manage_system` | Wartung | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory, compact |
 
 ### mutate_memory (Schreiben)
 
@@ -669,6 +671,10 @@ Aktionen:
 - `snapshot_list`: `{}`
 - `snapshot_diff`: `{ snapshot_id_a, snapshot_id_b }`
 - `cleanup`: `{ confirm, older_than_days?, max_observations?, min_entity_degree?, model? }`
+- `compact`: `{ session_id?, entity_id?, model? }` **(Neu v2.2)**: Manuelle Kontext-Kompaktierung. Unterstützt drei Modi:
+  - **Session-Kompaktierung**: `{ session_id, model? }` - Fasst Session-Observations in 2-3 Bullet Points zusammen und speichert im User-Profil
+  - **Entity-Kompaktierung**: `{ entity_id, model? }` - Komprimiert Entity-Observations bei Schwellenwert-Überschreitung, erstellt Executive Summary
+  - **Globale Kompaktierung**: `{}` (keine Parameter) - Komprimiert alle Entities, die den Schwellenwert überschreiten (Standard: 20 Observations)
 - `summarize_communities`: `{ model?, min_community_size? }` **(Neu v2.0)**: Triggert die **Hierarchical GraphRAG** Pipeline. Berechnet Communities neu, generiert thematische Zusammenfassungen via LLM und speichert diese als `CommunitySummary` Entitäten.
 - `reflect`: `{ entity_id?, mode?, model? }` Analysiert Memory auf Widersprüche und neue Einsichten. Unterstützt die Modi `summary` (Standard) und `discovery` (autonome Beziehungs-Refinerung).
 - `clear_memory`: `{ confirm }`
@@ -677,6 +683,17 @@ Janitor-Cleanup Details:
 - `cleanup` unterstützt `dry_run`: bei `confirm: false` werden nur Kandidaten gelistet.
 - Bei `confirm: true` wird der Janitor aktiv:
   - **Hierarchische Summarization**: Erkennt isolierte oder alte Beobachtungen, lässt sie von einer lokalen LLM (Ollama) zusammenfassen und erstellt einen neuen `ExecutiveSummary`-Knoten. Die alten Fragmente werden gelöscht, um Rauschen zu reduzieren, während das Wissen erhalten bleibt.
+
+Kontext-Kompaktierung Details **(Neu v2.2)**:
+- **Automatische Kompaktierung**: Wird automatisch ausgelöst, wenn Observations den Schwellenwert überschreiten (Standard: 20)
+  - Läuft im Hintergrund während `addObservation`
+  - Verwendet Lock-Mechanismus zur Vermeidung gleichzeitiger Kompaktierung
+- **Manuelle Kompaktierung**: Verfügbar via `compact` Action in `manage_system`
+  - **Session-Modus**: Fasst Session-Observations zusammen und speichert im `global_user_profile`
+  - **Entity-Modus**: Komprimiert spezifische Entity mit anpassbarem Schwellenwert
+  - **Globaler Modus**: Komprimiert alle Entities, die den Schwellenwert überschreiten
+- **Progressive Summarization**: Neue Observations werden mit existierenden Executive Summaries gemergt statt einfach angehängt
+- **LLM-Integration**: Verwendet Ollama (Standard-Modell: `demyagent-4b-i1:Q6_K`) für intelligente Zusammenfassung
 
 **Vor Janitor:**
 ```
