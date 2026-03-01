@@ -10,6 +10,7 @@ import fs from "fs";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { HybridSearch } from "./hybrid-search";
 import { InferenceEngine } from "./inference-engine";
+import { DynamicFusionSearch, FusionConfig, DEFAULT_FUSION_CONFIG } from "./dynamic-fusion";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
 const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
@@ -23,6 +24,7 @@ export class MemoryServer {
   public mcp: FastMCP;
   public embeddingService: EmbeddingService;
   public hybridSearch: HybridSearch;
+  public dynamicFusion: DynamicFusionSearch;
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
   private compactionLocks: Set<string> = new Set();
@@ -79,6 +81,7 @@ export class MemoryServer {
     console.error(`[DB] Using backend: ${DB_ENGINE}, path: ${fullDbPath}`);
     this.embeddingService = new EmbeddingService();
     this.hybridSearch = new HybridSearch(this.db, this.embeddingService);
+    this.dynamicFusion = new DynamicFusionSearch(this.db, this.embeddingService);
     this.inferenceEngine = new InferenceEngine(this.db, this.embeddingService);
 
     this.mcp = new FastMCP({
@@ -3822,14 +3825,52 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         session_id: z.string().optional().describe("Prioritize results from this session"),
         task_id: z.string().optional().describe("Prioritize results from this task"),
       }),
+      z.object({
+        action: z.literal("dynamic_fusion"),
+        query: z.string().describe("Search query"),
+        config: z.object({
+          vector: z.object({
+            enabled: z.boolean().optional().default(true),
+            weight: z.number().min(0).max(1).optional().default(0.4),
+            topK: z.number().optional().default(20),
+            efSearch: z.number().optional().default(100),
+          }).optional(),
+          sparse: z.object({
+            enabled: z.boolean().optional().default(true),
+            weight: z.number().min(0).max(1).optional().default(0.3),
+            topK: z.number().optional().default(20),
+            minScore: z.number().optional().default(0.1),
+          }).optional(),
+          fts: z.object({
+            enabled: z.boolean().optional().default(true),
+            weight: z.number().min(0).max(1).optional().default(0.2),
+            topK: z.number().optional().default(20),
+            fuzzy: z.boolean().optional().default(true),
+          }).optional(),
+          graph: z.object({
+            enabled: z.boolean().optional().default(true),
+            weight: z.number().min(0).max(1).optional().default(0.1),
+            maxDepth: z.number().min(1).max(3).optional().default(2),
+            maxResults: z.number().optional().default(20),
+            relationTypes: z.array(z.string()).optional(),
+          }).optional(),
+          fusion: z.object({
+            strategy: z.enum(['rrf', 'weighted_sum', 'max', 'adaptive']).optional().default('rrf'),
+            rrfK: z.number().optional().default(60),
+            minScore: z.number().optional().default(0.0),
+            deduplication: z.boolean().optional().default(true),
+          }).optional(),
+        }).optional().describe("Dynamic fusion configuration (all paths optional)"),
+        limit: z.number().optional().default(10).describe("Maximum number of results to return"),
+      }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion"])
         .describe("Action (determines which fields are required)"),
-      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search"),
-      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking"),
+      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search/dynamic_fusion"),
+      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking/dynamic_fusion"),
       session_id: z.string().optional().describe("Optional session ID for context boosting"),
       task_id: z.string().optional().describe("Optional task ID for context boosting"),
       filters: z.any().optional().describe("Only for advancedSearch"),
@@ -3845,6 +3886,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
       max_depth: z.number().optional().describe("Only for graph_rag/graph_walking: Maximum expansion depth"),
       start_entity_id: z.string().optional().describe("Only for graph_walking: Start entity"),
       rerank: z.boolean().optional().describe("Only for search/advancedSearch/agentic_search: Enable Cross-Encoder reranking"),
+      config: z.any().optional().describe("Only for dynamic_fusion: Fusion configuration object"),
     });
 
     this.mcp.addTool({
@@ -3861,8 +3903,9 @@ Supported actions:
 - 'graph_rag': Graph-based reasoning (Hybrid RAG). Finds semantic vector seeds first, then expands via graph traversals. Ideal for multi-hop reasoning. Params: { query: string, max_depth?: number, limit?: number }.
 - 'graph_walking': Recursive semantic graph search. Starts at vector seeds or an entity and follows relationships to other semantically relevant entities. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
 - 'agentic_search': Auto-Routing Search. Uses local LLM to analyze intent and routes the query automatically to the best strategy (Vector, Graph, or Community Summaries). Params: { query: string, limit?: number }.
+- 'dynamic_fusion': Advanced multi-path fusion search combining Vector (HNSW), Sparse (keyword), FTS (full-text), and Graph traversal with configurable weights and strategies. Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }. Each path can be enabled/disabled and weighted independently. Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'. Returns results with path contribution details and performance stats.
 
-Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
+Notes: 'dynamic_fusion' provides the most control and transparency over retrieval paths. 'agentic_search' is the most adaptive. 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -4062,6 +4105,65 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             rerank: input.rerank,
           });
           return JSON.stringify(results);
+        }
+
+        if (input.action === "dynamic_fusion") {
+          const startTime = Date.now();
+          
+          if (!input.query || input.query.trim().length === 0) {
+            return JSON.stringify({ error: "Search query must not be empty." });
+          }
+
+          try {
+            console.log('[query_memory] Dynamic Fusion search:', {
+              query: input.query,
+              config: input.config ? 'custom' : 'default',
+              limit: input.limit
+            });
+
+            // Execute dynamic fusion search
+            const { results, stats } = await this.dynamicFusion.search(
+              input.query,
+              input.config || {}
+            );
+
+            // Apply limit
+            const limitedResults = results.slice(0, input.limit || 10);
+
+            const response = {
+              results: limitedResults,
+              stats: {
+                ...stats,
+                totalTime: Date.now() - startTime,
+                resultsReturned: limitedResults.length,
+                resultsTotal: results.length
+              },
+              metadata: {
+                query: input.query,
+                fusionStrategy: input.config?.fusion?.strategy || 'rrf',
+                enabledPaths: {
+                  vector: input.config?.vector?.enabled !== false,
+                  sparse: input.config?.sparse?.enabled !== false,
+                  fts: input.config?.fts?.enabled !== false,
+                  graph: input.config?.graph?.enabled !== false
+                }
+              }
+            };
+
+            console.log('[query_memory] Dynamic Fusion completed:', {
+              resultsReturned: limitedResults.length,
+              totalTime: response.stats.totalTime,
+              pathContributions: stats.pathContributions
+            });
+
+            return JSON.stringify(response);
+          } catch (error: any) {
+            console.error('[query_memory] Dynamic Fusion error:', error);
+            return JSON.stringify({ 
+              error: "Dynamic fusion search failed", 
+              details: error.message 
+            });
+          }
         }
 
         if (input.action === "graph_rag") {
