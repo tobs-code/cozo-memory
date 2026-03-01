@@ -358,6 +358,64 @@ EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2 npm run download-model
 
 **Note:** Changing models requires re-embedding existing data. The model is downloaded once on first use.
 
+## Framework Adapters
+
+Official adapters for seamless integration with popular AI frameworks:
+
+### 🦜 LangChain Adapter
+
+```bash
+npm install @cozo-memory/langchain @cozo-memory/adapters-core
+```
+
+```typescript
+import { CozoMemoryChatHistory, CozoMemoryRetriever } from '@cozo-memory/langchain';
+import { BufferMemory } from 'langchain/memory';
+
+// Chat history with session management
+const chatHistory = new CozoMemoryChatHistory({
+  sessionName: 'user-123'
+});
+
+const memory = new BufferMemory({ chatHistory });
+
+// Retriever with hybrid search or Graph-RAG
+const retriever = new CozoMemoryRetriever({
+  useGraphRAG: true,
+  graphRAGDepth: 2
+});
+```
+
+### 🦙 LlamaIndex Adapter
+
+```bash
+npm install @cozo-memory/llamaindex @cozo-memory/adapters-core
+```
+
+```typescript
+import { CozoVectorStore } from '@cozo-memory/llamaindex';
+import { VectorStoreIndex } from 'llamaindex';
+
+// Vector store with Graph-RAG support
+const vectorStore = new CozoVectorStore({
+  useGraphRAG: true
+});
+
+const index = await VectorStoreIndex.fromDocuments(
+  documents,
+  { vectorStore }
+);
+```
+
+**Features:**
+- ✅ Persistent chat history (LangChain)
+- ✅ Hybrid search retrieval (both)
+- ✅ Graph-RAG mode (both)
+- ✅ Session management (LangChain)
+- ✅ Vector store operations (LlamaIndex)
+
+**Documentation:** See [adapters/README.md](./adapters/README.md) for complete examples and API reference.
+
 ## Start / Integration
 
 ### MCP Server (stdio)

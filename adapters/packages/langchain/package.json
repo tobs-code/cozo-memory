@@ -4,11 +4,26 @@
   "description": "LangChain adapter for Cozo Memory - persistent chat history and memory",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cozo-memory.git",
+    "directory": "adapters/packages/langchain"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/cozo-memory/issues"
+  },
+  "homepage": "https://github.com/yourusername/cozo-memory/tree/main/adapters/packages/langchain#readme",
   "dependencies": {
     "@cozo-memory/adapters-core": "^0.1.0",
     "@langchain/core": "^0.3.0"
@@ -20,13 +35,22 @@
     "@types/node": "^20.0.0",
     "typescript": "^5.9.0"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "keywords": [
     "cozo-memory",
     "langchain",
     "chat-history",
     "memory",
     "ai",
-    "agents"
+    "agents",
+    "rag",
+    "retriever",
+    "local-first"
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

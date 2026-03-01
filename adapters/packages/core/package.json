@@ -4,11 +4,26 @@
   "description": "Shared MCP client for Cozo Memory framework adapters",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cozo-memory.git",
+    "directory": "adapters/packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/cozo-memory/issues"
+  },
+  "homepage": "https://github.com/yourusername/cozo-memory/tree/main/adapters/packages/core#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "uuid": "^11.0.5"
@@ -18,10 +33,19 @@
     "@types/uuid": "^10.0.0",
     "typescript": "^5.9.0"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "keywords": [
     "cozo-memory",
     "mcp",
-    "client"
+    "client",
+    "model-context-protocol",
+    "ai",
+    "memory"
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

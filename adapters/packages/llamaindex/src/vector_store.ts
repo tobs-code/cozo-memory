@@ -109,16 +109,62 @@ export class CozoVectorStore extends BaseVectorStore {
     const ids: string[] = [];
     const similarities: number[] = [];
 
-    if (result.observations) {
-      for (const obs of result.observations) {
-        nodes.push({
-          id_: obs.metadata?.node_id || obs.id,
-          text: obs.text,
-          metadata: obs.metadata || {},
-          embedding: obs.metadata?.embedding
-        });
-        ids.push(obs.id);
-        similarities.push(1.0);
+    // Search returns an array of entity results
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        // Get entity details to retrieve observations
+        try {
+          const entityDetails = await this.mcp_client.getEntity(item.entity_id);
+          
+          // If entity has observations, use them as nodes
+          if (entityDetails.observations && entityDetails.observations.length > 0) {
+            for (const obs of entityDetails.observations) {
+              nodes.push({
+                id_: obs.metadata?.node_id || item.id,
+                text: obs.text,
+                metadata: {
+                  ...obs.metadata,
+                  entity_name: item.name,
+                  entity_type: item.type,
+                  entity_id: item.entity_id
+                },
+                embedding: obs.metadata?.embedding
+              });
+              ids.push(item.id);
+              similarities.push(item.score || 1.0);
+            }
+          } else {
+            // No observations, use entity name as fallback
+            nodes.push({
+              id_: item.metadata?.node_id || item.id,
+              text: item.name || '',
+              metadata: {
+                ...item.metadata,
+                entity_name: item.name,
+                entity_type: item.type,
+                entity_id: item.entity_id
+              },
+              embedding: item.metadata?.embedding
+            });
+            ids.push(item.id);
+            similarities.push(item.score || 1.0);
+          }
+        } catch (error) {
+          // If entity details fetch fails, use entity name as fallback
+          nodes.push({
+            id_: item.metadata?.node_id || item.id,
+            text: item.name || '',
+            metadata: {
+              ...item.metadata,
+              entity_name: item.name,
+              entity_type: item.type,
+              entity_id: item.entity_id
+            },
+            embedding: item.metadata?.embedding
+          });
+          ids.push(item.id);
+          similarities.push(item.score || 1.0);
+        }
       }
     }
 

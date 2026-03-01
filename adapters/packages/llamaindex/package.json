@@ -4,11 +4,26 @@
   "description": "LlamaIndex adapter for Cozo Memory - vector store and document storage",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cozo-memory.git",
+    "directory": "adapters/packages/llamaindex"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/cozo-memory/issues"
+  },
+  "homepage": "https://github.com/yourusername/cozo-memory/tree/main/adapters/packages/llamaindex#readme",
   "dependencies": {
     "@cozo-memory/adapters-core": "^0.1.0",
     "llamaindex": "^0.7.0"
@@ -17,12 +32,21 @@
     "@types/node": "^20.0.0",
     "typescript": "^5.9.0"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "keywords": [
     "cozo-memory",
     "llamaindex",
     "vector-store",
     "rag",
-    "ai"
+    "ai",
+    "graph-rag",
+    "hybrid-search",
+    "local-first"
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

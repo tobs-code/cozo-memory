@@ -29,27 +29,30 @@ LlamaIndex integration with vector store and document storage.
 - Persistent indexes
 - Document management
 
-### [@cozo-memory/crewai](./packages/crewai/) 📋
-CrewAI integration with storage backend (planned).
+### [@cozo-memory/crewai](./packages/crewai/) ⏸️
+CrewAI integration (postponed - awaiting TypeScript support).
 
-**Status:** Planned  
-**Features:**
-- `CozoStorageBackend` - StorageBackend implementation
-- Multi-agent memory
-- Scoped storage
+**Status:** Postponed  
+**Reason:** CrewAI is currently Python-only. Will implement when official TypeScript SDK becomes available.  
+**Alternative:** Use HTTP API bridge (`npm run bridge` in main package) for Python CrewAI integration.
 
 ## Installation
 
 ```bash
-# LangChain adapter
+# Install from npm (once published)
 npm install @cozo-memory/langchain @cozo-memory/adapters-core
-
-# LlamaIndex adapter
 npm install @cozo-memory/llamaindex @cozo-memory/adapters-core
 
-# CrewAI adapter (coming soon)
-npm install @cozo-memory/crewai @cozo-memory/adapters-core
+# Or install from local workspace
+cd adapters
+npm install
+npm run build
 ```
+
+**Prerequisites:**
+- Node.js 20+
+- Cozo Memory MCP Server (from main package)
+- TypeScript 5.9+ (for development)
 
 ## Quick Start
 
@@ -123,10 +126,36 @@ cd packages/llamaindex && npm run build
 cd adapters
 npx ts-node test-adapter.ts
 
-# Test LlamaIndex adapter (coming soon)
+# Test LlamaIndex adapter
+cd adapters
+npx ts-node test-llamaindex-adapter.ts
+
+# Run example projects
+cd examples/langchain
+npx ts-node chatbot.ts
+
 cd examples/llamaindex
-npm run basic-rag
+npx ts-node basic-rag.ts
 ```
+
+### Test Results
+
+Both adapters have been comprehensively tested:
+
+**LangChain Adapter:**
+- ✅ Chat history persistence
+- ✅ Session management
+- ✅ Message retrieval
+- ✅ Hybrid search retriever
+- ✅ Graph-RAG retriever
+
+**LlamaIndex Adapter:**
+- ✅ Vector store basics (add, query, delete)
+- ✅ Graph-RAG mode
+- ✅ Persistence across sessions
+- ✅ Edge cases (empty queries, auto-IDs, non-existent deletes)
+- ✅ Client reuse
+- ✅ Complex metadata handling
 
 ## Architecture
 
