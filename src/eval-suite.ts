@@ -105,11 +105,15 @@ async function runEvaluation() {
 
     const server = new MemoryServer(EVAL_DB_PATH);
     await server.embeddingService.embed("warmup");
+    // Warmup reranker
+    await server.hybridSearch.advancedSearch({ query: "warmup", limit: 1, rerank: true });
     await setupEvalData(server);
 
     const methods = [
         { name: "Hybrid Search", func: (q: string) => server.hybridSearch.search({ query: q, limit: 10 }) },
+        { name: "Reranked Search", func: (q: string) => server.hybridSearch.search({ query: q, limit: 10, rerank: true }) },
         { name: "Graph-RAG", func: (q: string) => server.hybridSearch.graphRag({ query: q, limit: 10, graphConstraints: { maxDepth: 2 } }) },
+        { name: "Graph-RAG (Reranked)", func: (q: string) => server.hybridSearch.graphRag({ query: q, limit: 10, graphConstraints: { maxDepth: 2 }, rerank: true }) },
         { name: "Graph-Walking", func: (q: string) => server.graph_walking({ query: q, limit: 10, max_depth: 3 }) }
     ];
 
@@ -121,6 +125,9 @@ async function runEvaluation() {
         let totalRecall10 = 0;
         let totalMRR = 0;
         let totalLatency = 0;
+        const n = EVAL_DATASET.length;
+        // Reset cache between methods to get accurate latency
+        await server.hybridSearch.clearCache();
 
         for (const task of EVAL_DATASET) {
             const t0 = performance.now();
@@ -137,7 +144,6 @@ async function runEvaluation() {
             totalLatency += (t1 - t0);
         }
 
-        const n = EVAL_DATASET.length;
         summary.push({
             Method: method.name,
             "Recall@3": (totalRecall3 / n).toFixed(3),

@@ -1,6 +1,7 @@
 import { CozoDb } from "cozo-node";
 import { EmbeddingService } from "./embedding-service";
 import crypto from "crypto";
+import { RerankerService } from "./reranker-service";
 
 export interface SearchResult {
   id: string;
@@ -30,6 +31,7 @@ export interface HybridSearchOptions {
   keywordWeight?: number;
   inferenceWeight?: number;
   timeRangeHours?: number;
+  rerank?: boolean;
 }
 
 export interface AdvancedHybridQueryOptions extends HybridSearchOptions {
@@ -54,12 +56,14 @@ const SEMANTIC_CACHE_THRESHOLD = 0.95;
 export class HybridSearch {
   private db: CozoDb;
   private embeddingService: EmbeddingService;
+  private rerankerService: RerankerService;
   private searchCache = new Map<string, { results: SearchResult[]; timestamp: number }>();
   private readonly CACHE_TTL = 300000; // 5 minutes cache
 
   constructor(db: CozoDb, embeddingService: EmbeddingService) {
     this.db = db;
     this.embeddingService = embeddingService;
+    this.rerankerService = new RerankerService();
   }
 
   private getCacheKey(options: HybridSearchOptions): string {
@@ -131,6 +135,38 @@ export class HybridSearch {
       }
       return { ...r, score };
     });
+  }
+
+  private async applyReranking(query: string, results: SearchResult[]): Promise<SearchResult[]> {
+    if (results.length <= 1) return results;
+
+    console.error(`[HybridSearch] Reranking ${results.length} candidates...`);
+    const documents = results.map(r => {
+      const parts = [
+        r.name ? `Name: ${r.name}` : '',
+        r.type ? `Type: ${r.type}` : '',
+        r.text ? `Description: ${r.text}` : '',
+        r.metadata ? `Details: ${JSON.stringify(r.metadata)}` : ''
+      ].filter(p => p !== '');
+      return parts.join(' | ');
+    });
+
+    try {
+      const rerankedOrder = await this.rerankerService.rerank(query, documents);
+
+      return rerankedOrder.map((item, i) => {
+        const original = results[item.index];
+        return {
+          ...original,
+          score: (item.score + 1.0) / 2.0, // Normalize to 0-1 range if it's logits, or just use as is
+          explanation: (typeof original.explanation === 'string' ? original.explanation : JSON.stringify(original.explanation)) +
+            ` | Reranked (Rank ${i + 1}, Cross-Encoder Score: ${item.score.toFixed(4)})`
+        };
+      });
+    } catch (e) {
+      console.error(`[HybridSearch] Reranking failed, returning original results:`, e);
+      return results;
+    }
   }
 
   async advancedSearch(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
@@ -298,6 +334,14 @@ export class HybridSearch {
       }
 
       const finalResults = this.applyTimeDecay(searchResults);
+
+      // Phase 3: Reranking
+      if (options.rerank) {
+        const rerankedResults = await this.applyReranking(options.query, finalResults);
+        await this.updateCache(options, queryEmbedding, rerankedResults);
+        return rerankedResults;
+      }
+
       await this.updateCache(options, queryEmbedding, finalResults);
       return finalResults;
     } catch (e: any) {
@@ -430,7 +474,13 @@ export class HybridSearch {
         });
       }
 
-      return this.applyTimeDecay(searchResults);
+      const decayedResults = this.applyTimeDecay(searchResults);
+
+      if (options.rerank) {
+        return await this.applyReranking(options.query, decayedResults);
+      }
+
+      return decayedResults;
     } catch (e: any) {
       console.error("[HybridSearch] Error in graphRag:", e.message);
       // Fallback to normal search on error
@@ -520,7 +570,8 @@ No markdown, no explanation. Just the JSON.`;
           filters: {
             ...options.filters,
             entityTypes: ["CommunitySummary"]
-          }
+          },
+          rerank: options.rerank
         });
 
         // If no community summaries found, fallback to standard search
@@ -544,5 +595,15 @@ No markdown, no explanation. Just the JSON.`;
         agentic_routing: strategy
       }
     }));
+  }
+
+  async clearCache() {
+    this.searchCache.clear();
+    try {
+      await this.db.run(`{ ?[query_hash] := *search_cache{query_hash} :rm search_cache {query_hash} }`);
+      console.error("[HybridSearch] Cache cleared successfully.");
+    } catch (e) {
+      console.error("[HybridSearch] Error clearing cache:", e);
+    }
   }
 }

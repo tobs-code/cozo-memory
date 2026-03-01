@@ -63,6 +63,8 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
 
+🎯 **Tiny Learned Reranker (v2.0)** - Integrated Cross-Encoder model (`ms-marco-MiniLM-L-6-v2`) for ultra-precise re-ranking of top search results
+
 🎯 **Multi-Vector Support (since v1.7)** - Dual embeddings per entity: content-embedding for context, name-embedding for identification
 
 ⚡ **Semantic Caching (since v0.8.5)** - Two-level cache (L1 memory + L2 persistent) with semantic query matching
@@ -191,8 +193,10 @@ This tool compares strategies using a synthetic dataset and measures **Recall@K*
 | Method | Recall@10 | Avg Latency | Best For |
 | :--- | :--- | :--- | :--- |
 | **Graph-RAG** | **1.00** | **~32 ms** | Deep relational reasoning |
+| **Graph-RAG (Reranked)** | **1.00** | **~36 ms** | Maximum precision for relational data |
 | **Graph-Walking** | 1.00 | ~50 ms | Associative path exploration |
 | **Hybrid Search** | 1.00 | ~89 ms | Broad factual retrieval |
+| **Reranked Search** | 1.00 | ~20 ms* | Ultra-precise factual search (Warm cache) |
 
 ## Architecture
 
@@ -608,14 +612,14 @@ PDF Ingestion via File Path:
 ### query_memory (Read)
 
 Actions:
-- `search`: `{ query, limit?, entity_types?, include_entities?, include_observations? }`
-- `advancedSearch`: `{ query, limit?, filters?, graphConstraints?, vectorOptions? }` **(New v1.1 / v1.4)**: Extended search with native HNSW filters (types) and robust post-filtering (metadata, time).
+- `search`: `{ query, limit?, entity_types?, include_entities?, include_observations?, rerank? }`
+- `advancedSearch`: `{ query, limit?, filters?, graphConstraints?, vectorOptions?, rerank? }`
 - `context`: `{ query, context_window?, time_range_hours? }`
 - `entity_details`: `{ entity_id, as_of? }`
 - `history`: `{ entity_id }`
-- `graph_rag`: `{ query, max_depth?, limit?, filters? }` Graph-based reasoning. Finds vector seeds (with inline filtering) first and then expands transitive relationships. Uses recursive Datalog for efficient BFS expansion.
+- `graph_rag`: `{ query, max_depth?, limit?, filters?, rerank? }` Graph-based reasoning. Finds vector seeds (with inline filtering) first and then expands transitive relationships. Uses recursive Datalog for efficient BFS expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Recursive semantic graph search. Starts at vector seeds or a specific entity and follows relationships to other semantically relevant entities. Ideal for deeper path exploration.
-- `agentic_search`: `{ query, limit? }` **(New v2.0)**: **Auto-Routing Search**. Uses a local LLM (Ollama) to analyze query intent and automatically routes it to the most appropriate strategy (`vector_search`, `graph_walk`, or `community_summary`).
+- `agentic_search`: `{ query, limit?, rerank? }` **(New v2.0)**: **Auto-Routing Search**. Uses a local LLM (Ollama) to analyze query intent and automatically routes it to the most appropriate strategy (`vector_search`, `graph_walk`, or `community_summary`).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Shows temporal development of relationships including time range filter and diff summary.
 
 Important Details:
@@ -884,6 +888,15 @@ Temporal Decay (active by default):
 Uncertainty/Transparency:
 - Inference candidates are marked as `source: "inference"` and provide a short reason (uncertainty hint) in the result.
 - In `context` output, inferred entities additionally carry an `uncertainty_hint` so an LLM can distinguish "hard fact" vs. "conjecture".
+
+### Tiny Learned Reranker (Cross-Encoder)
+
+For maximum precision, CozoDB Memory integrates a specialized **Cross-Encoder Reranker** (Phase 2 RAG).
+
+- **Model**: `Xenova/ms-marco-MiniLM-L-6-v2` (Local ONNX)
+- **Mechanism**: After initial hybrid retrieval, the top candidates (up to 30) are re-evaluated by the cross-encoder. Unlike bi-encoders (vectors), cross-encoders process query and document simultaneously, capturing deep semantic nuances.
+- **Latency**: Minimal overhead (~4-6ms for top 10 candidates).
+- **Supported Tools**: Available as a `rerank: true` parameter in `search`, `advancedSearch`, `graph_rag`, and `agentic_search`.
 
 ### Inference Engine
 

@@ -60,6 +60,8 @@ npm run start
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.
 
+🎯 **Tiny Learned Reranker (v2.0)** - Integriertes Cross-Encoder Modell (`ms-marco-MiniLM-L-6-v2`) für ultra-präzises Re-Ranking der Top-Suchergebnisse.
+
 🎯 **Multi-Vector Support (seit v1.7)** - Duale Embeddings pro Entity: Content-Embedding für Kontext, Name-Embedding für Identifikation
 
 ⚡ **Semantic Caching (seit v0.8.5)** - Zweistufiger Cache (L1 Memory + L2 Persistent) mit semantischem Query-Matching
@@ -193,8 +195,10 @@ Dieses Tool vergleicht die Strategien anhand eines synthetischen Datensatzes und
 | Methode | Recall@10 | Avg Latenz | Bestens geeignet für |
 | :--- | :--- | :--- | :--- |
 | **Graph-RAG** | **1.00** | **~32 ms** | Tiefes relationales Reasoning |
+| **Graph-RAG (Reranked)** | **1.00** | **~36 ms** | Maximale Präzision für relationale Daten |
 | **Graph-Walking** | 1.00 | ~50 ms | Assoziative Pfad-Exploration |
 | **Hybrid-Suche** | 1.00 | ~89 ms | Breite Fakten-Abfrage |
+| **Reranked Search** | 1.00 | ~20 ms* | Ultra-präzise Faktensuche (Warm Cache) |
 
 ## Architektur (high level)
 
@@ -462,14 +466,14 @@ PDF-Ingestion über Dateipfad:
 ### query_memory (Lesen)
 
 Aktionen:
-- `search`: `{ query, limit?, entity_types?, include_entities?, include_observations? }`
-- `advancedSearch`: `{ query, limit?, filters?, graphConstraints?, vectorOptions? }` **(Neu v1.1 / v1.4)**: Erweiterte Suche mit nativen HNSW-Filtern (Typen) und robustem Post-Filtering (Metadaten, Zeit).
+- `search`: `{ query, limit?, entity_types?, include_entities?, include_observations?, rerank? }`
+- `advancedSearch`: `{ query, limit?, filters?, graphConstraints?, vectorOptions?, rerank? }`
 - `context`: `{ query, context_window?, time_range_hours? }`
 - `entity_details`: `{ entity_id, as_of? }`
 - `history`: `{ entity_id }`
-- `graph_rag`: `{ query, max_depth?, limit?, filters? }` Graph-basiertes Reasoning. Findet erst Vektor-Seeds (mit Inline-Filtering) und expandiert dann transitive Beziehungen. Nutzt rekursives Datalog für effiziente BFS-Expansion.
+- `graph_rag`: `{ query, max_depth?, limit?, filters?, rerank? }` Graph-basiertes Reasoning. Findet erst Vektor-Seeds (mit Inline-Filtering) und expandiert dann transitive Beziehungen. Nutzt rekursives Datalog für effiziente BFS-Expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Rekursive semantische Graph-Suche. Startet bei Vektor-Seeds oder einer spezifischen Entität und folgt Beziehungen zu anderen semantisch relevanten Entitäten. Ideal für tiefere Pfad-Exploration.
-- `agentic_search`: `{ query, limit? }` **(Neu v2.0)**: **Auto-Routing Suche**. Nutzt ein lokales LLM (Ollama), um den Query-Intent zu analysieren und routet die Anfrage automatisch zur am besten geeigneten Strategie (`vector_search`, `graph_walk`, oder `community_summary`).
+- `agentic_search`: `{ query, limit?, rerank? }` **(Neu v2.0)**: **Auto-Routing Suche**. Nutzt ein lokales LLM (Ollama), um den Query-Intent zu analysieren und routet die Anfrage automatisch zur am besten geeigneten Strategie (`vector_search`, `graph_walk`, oder `community_summary`).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Zeigt die zeitliche Entwicklung von Beziehungen inklusive Zeitbereichs-Filter und Diff-Zusammenfassung.
 
 Wichtige Details:
@@ -784,6 +788,15 @@ Beispiel-Antwort:
 Default-Modell: `Xenova/bge-m3` (1024 Dimensionen).
 
 Die Embeddings werden auf der CPU verarbeitet, um maximale Kompatibilität zu gewährleisten. Sie werden in einem LRU-Cache gehalten (1000 Einträge, 1h TTL). Bei Embedding-Fehlern wird ein Nullvektor zurückgegeben, damit Tool-Aufrufe stabil bleiben.
+
+### Tiny Learned Reranker (Cross-Encoder)
+
+Für maximale Präzision integriert CozoDB Memory einen spezialisierten **Cross-Encoder Reranker** (Phase 2 RAG).
+
+- **Modell**: `Xenova/ms-marco-MiniLM-L-6-v2` (Lokal via ONNX)
+- **Mechanismus**: Nach dem initialen Hybrid-Retrieval werden die Top-Kandidaten (bis zu 30) durch den Cross-Encoder neu bewertet. Im Gegensatz zu Bi-Encodern (Vektoren) verarbeiten Cross-Encoder Query und Dokument simultan und erfassen so tiefere semantische Nuancen.
+- **Latenz**: Minimaler Overhead (~4-6ms für Top 10 Kandidaten).
+- **Unterstützte Tools**: Verfügbar als `rerank: true` Parameter in `search`, `advancedSearch`, `graph_rag` und `agentic_search`.
 
 ### Hybrid Search (Vector + Keyword + Graph + Inference) + RRF
 

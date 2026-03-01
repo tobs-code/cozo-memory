@@ -68,10 +68,18 @@ export class EmbeddingService {
   private tokenizer: any = null;
   private readonly modelId: string;
   private readonly dimensions: number;
+  private readonly useOllama: boolean;
+  private readonly ollamaModel: string;
+  private readonly ollamaBaseUrl: string;
   private queue: Promise<any> = Promise.resolve();
 
   constructor() {
     this.cache = new LRUCache<number[]>(1000, 3600000); // 1000 entries, 1h TTL
+    
+    // Check if Ollama should be used
+    this.useOllama = process.env.USE_OLLAMA === 'true';
+    this.ollamaModel = process.env.OLLAMA_EMBEDDING_MODEL || 'argus-ai/pplx-embed-v1-0.6b:q8_0';
+    this.ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
     
     // Support multiple embedding models via environment variable
     this.modelId = process.env.EMBEDDING_MODEL || "Xenova/bge-m3";
@@ -83,11 +91,21 @@ export class EmbeddingService {
       "Xenova/bge-small-en-v1.5": 384,
       "Xenova/nomic-embed-text-v1": 768,
       "onnx-community/Qwen3-Embedding-0.6B-ONNX": 1024,
+      // Note: perplexity-ai models require manual ONNX file placement
+      // See PPLX_EMBED_INTEGRATION.md for instructions
+      "perplexity-ai/pplx-embed-v1-0.6b": 1024,
+      "perplexity-ai/pplx-embed-v1-4b": 2560,
+      // Ollama models
+      "argus-ai/pplx-embed-v1-0.6b:q8_0": 1024,
     };
     
-    this.dimensions = dimensionMap[this.modelId] || 1024;
+    this.dimensions = dimensionMap[this.useOllama ? this.ollamaModel : this.modelId] || 1024;
     
-    console.error(`[EmbeddingService] Using model: ${this.modelId} (${this.dimensions} dimensions)`);
+    if (this.useOllama) {
+      console.error(`[EmbeddingService] Using Ollama: ${this.ollamaModel} @ ${this.ollamaBaseUrl} (${this.dimensions} dimensions)`);
+    } else {
+      console.error(`[EmbeddingService] Using ONNX model: ${this.modelId} (${this.dimensions} dimensions)`);
+    }
   }
 
   // Public getter for dimensions
@@ -106,6 +124,12 @@ export class EmbeddingService {
 
   private async init() {
     if (this.session && this.tokenizer) return;
+    
+    // Skip ONNX initialization if using Ollama
+    if (this.useOllama) {
+      console.error('[EmbeddingService] Using Ollama backend, skipping ONNX initialization');
+      return;
+    }
 
     try {
       // 1. Check if model needs to be downloaded
@@ -124,11 +148,23 @@ export class EmbeddingService {
         console.log(`[EmbeddingService] Model not found, downloading ${this.modelId}...`);
         console.log(`[EmbeddingService] This may take a few minutes on first run.`);
         
-        // Import AutoModel dynamically to trigger download
-        const { AutoModel } = await import("@xenova/transformers");
-        await AutoModel.from_pretrained(this.modelId, { quantized: false });
-        
-        console.log(`[EmbeddingService] Model download completed.`);
+        // Check if this is a Xenova-compatible model
+        if (namespace === 'Xenova' || namespace === 'onnx-community') {
+          // Import AutoModel dynamically to trigger download
+          const { AutoModel } = await import("@xenova/transformers");
+          await AutoModel.from_pretrained(this.modelId, { quantized: false });
+          
+          console.log(`[EmbeddingService] Model download completed.`);
+        } else {
+          // For non-Xenova models (like perplexity-ai), provide manual download instructions
+          console.error(`[EmbeddingService] ERROR: Model ${this.modelId} is not available via @xenova/transformers`);
+          console.error(`[EmbeddingService] Please download the model manually:`);
+          console.error(`[EmbeddingService] 1. Visit: https://huggingface.co/${this.modelId}`);
+          console.error(`[EmbeddingService] 2. Download the 'onnx' folder contents`);
+          console.error(`[EmbeddingService] 3. Place files in: ${baseDir}`);
+          console.error(`[EmbeddingService] See PPLX_EMBED_INTEGRATION.md for detailed instructions`);
+          throw new Error(`Model ${this.modelId} requires manual download. See error messages above.`);
+        }
       }
 
       // 2. Load Tokenizer
@@ -184,6 +220,11 @@ export class EmbeddingService {
       }
 
       try {
+        // Use Ollama if enabled
+        if (this.useOllama) {
+          return await this.embedWithOllama(textStr);
+        }
+
         await this.init();
         if (!this.session || !this.tokenizer) throw new Error("Session/Tokenizer not initialized");
 
@@ -252,6 +293,44 @@ export class EmbeddingService {
         return new Array(this.dimensions).fill(0);
       }
     });
+  }
+
+  private async embedWithOllama(text: string): Promise<number[]> {
+    try {
+      const response = await fetch(`${this.ollamaBaseUrl}/api/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.ollamaModel,
+          prompt: text,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.embedding || !Array.isArray(data.embedding)) {
+        throw new Error('Invalid response from Ollama API');
+      }
+
+      const embedding = data.embedding;
+      
+      // Normalize the embedding
+      const normalized = this.normalize(embedding);
+      
+      // Cache it
+      this.cache.set(text, normalized);
+      
+      return normalized;
+    } catch (error: any) {
+      console.error(`[EmbeddingService] Ollama error for "${text.substring(0, 20)}...":`, error?.message || error);
+      return new Array(this.dimensions).fill(0);
+    }
   }
 
   // Batch-Embeddings
@@ -330,7 +409,8 @@ export class EmbeddingService {
     return {
       size: this.cache.size(),
       maxSize: 1000,
-      model: this.modelId,
+      model: this.useOllama ? this.ollamaModel : this.modelId,
+      backend: this.useOllama ? 'ollama' : 'onnx',
       dimensions: this.dimensions
     };
   }

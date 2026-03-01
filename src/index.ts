@@ -2962,6 +2962,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         entity_types: z.array(z.string()).optional().describe("Filter by entity types"),
         include_entities: z.boolean().optional().default(true).describe("Include entities in search"),
         include_observations: z.boolean().optional().default(true).describe("Include observations in search"),
+        rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
       }),
       z.object({
         action: z.literal("advancedSearch"),
@@ -2988,6 +2989,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         vectorParams: z.object({
           efSearch: z.number().optional().describe("HNSW search precision"),
         }).optional().describe("Vector parameters"),
+        rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
       }),
       z.object({
         action: z.literal("context"),
@@ -3009,6 +3011,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         query: z.string().describe("Search query for initial vector seeds"),
         max_depth: z.number().min(1).max(3).optional().default(2).describe("Maximum depth of graph expansion (Default: 2)"),
         limit: z.number().optional().default(10).describe("Number of initial vector seeds"),
+        rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
       }),
       z.object({
         action: z.literal("graph_walking"),
@@ -3021,6 +3024,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         action: z.literal("agentic_search"),
         query: z.string().describe("Context query for agentic routing"),
         limit: z.number().optional().default(10).describe("Maximum number of results"),
+        rerank: z.boolean().optional().default(false).describe("Use Cross-Encoder reranking for higher precision"),
       }),
     ]);
 
@@ -3042,6 +3046,7 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
       as_of: z.string().optional().describe("Only for entity_details: ISO string or 'NOW'"),
       max_depth: z.number().optional().describe("Only for graph_rag/graph_walking: Maximum expansion depth"),
       start_entity_id: z.string().optional().describe("Only for graph_walking: Start entity"),
+      rerank: z.boolean().optional().describe("Only for search/advancedSearch/agentic_search: Enable Cross-Encoder reranking"),
     });
 
     this.mcp.addTool({
@@ -3077,6 +3082,7 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             entityTypes: input.entity_types,
             includeEntities: input.include_entities,
             includeObservations: input.include_observations,
+            rerank: input.rerank,
           });
 
           const conflictEntityIds = Array.from(
@@ -3117,6 +3123,7 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             filters: input.filters,
             graphConstraints: input.graphConstraints,
             vectorParams: input.vectorParams,
+            rerank: input.rerank,
           });
 
           const conflictEntityIds = Array.from(
@@ -3250,6 +3257,7 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
           const results = await this.hybridSearch.agenticRetrieve({
             query: input.query,
             limit: input.limit,
+            rerank: input.rerank,
           });
           return JSON.stringify(results);
         }
@@ -3263,7 +3271,8 @@ Notes: 'agentic_search' is the most powerful and adaptable, 'context' is ideal f
             limit: input.limit,
             graphConstraints: {
               maxDepth: input.max_depth
-            }
+            },
+            rerank: input.rerank,
           });
           return JSON.stringify(results);
         }
