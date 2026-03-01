@@ -534,7 +534,7 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
-| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory, compact |
+| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compact |
 
 ### mutate_memory (Write)
 
@@ -738,6 +738,12 @@ Actions:
 - `snapshot_list`: `{}`
 - `snapshot_diff`: `{ snapshot_id_a, snapshot_id_b }`
 - `cleanup`: `{ confirm, older_than_days?, max_observations?, min_entity_degree?, model? }`
+- `defrag`: `{ confirm, similarity_threshold?, min_island_size? }` **(New v2.3)**: Memory defragmentation. Reorganizes memory structure by:
+  - **Duplicate Detection**: Finds and merges near-duplicate observations using cosine similarity (threshold 0.8-1.0, default 0.95)
+  - **Island Connection**: Connects small knowledge islands (≤3 nodes) to main graph via semantic bridges
+  - **Orphan Removal**: Deletes orphaned entities without observations or relations
+  - With `confirm: false`: Dry-run mode showing candidates without making changes
+  - With `confirm: true`: Executes defragmentation and returns statistics
 - `compact`: `{ session_id?, entity_id?, model? }` **(New v2.2)**: Manual context compaction. Supports three modes:
   - **Session Compaction**: `{ session_id, model? }` - Summarizes session observations into 2-3 bullet points and stores in user profile
   - **Entity Compaction**: `{ entity_id, model? }` - Compacts entity observations when threshold exceeded, creates Executive Summary

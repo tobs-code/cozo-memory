@@ -406,7 +406,7 @@ Die Oberfläche ist auf **4 konsolidierte Tools** reduziert. Die konkrete Operat
 | `mutate_memory` | Schreiboperationen | create_entity, update_entity, delete_entity, add_observation, create_relation, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
 | `query_memory` | Leseoperationen | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search |
 | `analyze_graph` | Graph-Analyse | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
-| `manage_system` | Wartung | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, reflect, summarize_communities, clear_memory, compact |
+| `manage_system` | Wartung | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compact |
 
 ### mutate_memory (Schreiben)
 
@@ -778,6 +778,19 @@ Beispiele:
 ```json
 { "action": "cleanup", "confirm": false, "older_than_days": 60, "max_observations": 25 }
 ```
+
+**Memory Defragmentation (v2.3):**
+
+```json
+{ "action": "defrag", "confirm": false, "similarity_threshold": 0.95, "min_island_size": 3 }
+```
+
+Die `defrag` Action reorganisiert die Memory-Struktur durch:
+1. **Duplikat-Erkennung**: Findet und merged near-duplicate Observations via Cosine-Similarity (Threshold 0.8-1.0, Standard 0.95)
+2. **Insel-Verbindung**: Verbindet kleine Wissensinseln (≤3 Nodes) mit dem Hauptgraphen via semantische Brücken
+3. **Orphan-Entfernung**: Löscht verwaiste Entities ohne Observations oder Relations
+
+Mit `confirm: false` wird ein Dry-Run durchgeführt, der Kandidaten anzeigt ohne Änderungen vorzunehmen.
 
 ```json
 { "action": "snapshot_diff", "snapshot_id_a": "SNAP_A", "snapshot_id_b": "SNAP_B" }
