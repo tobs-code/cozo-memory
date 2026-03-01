@@ -60,6 +60,8 @@ npm run start
 
 ⏳ **Temporal Graph Neural Networks (v2.4)** - Zeitbewusste Node-Embeddings, die historischen Kontext, zeitliche Glätte und Recency-gewichtete Aggregation mittels Time2Vec-Encoding und Multi-Signal-Fusion erfassen
 
+🔀 **Multi-Hop Reasoning mit Vector Pivots (v2.5)** - Logik-bewusste Retrieve-Reason-Prune-Pipeline, die Vector Search als Sprungbrett für Graph-Traversierung mit Helpfulness-Scoring und Pivot-Depth-Security nutzt
+
 🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchisches Retrieval mit Community-Detection und Summarization; rekursive Traversals via optimierte Datalog-Algorithmen
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.

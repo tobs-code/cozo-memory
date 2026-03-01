@@ -63,6 +63,8 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 ⏳ **Temporal Graph Neural Networks (v2.4)** - Time-aware node embeddings capturing historical context, temporal smoothness, and recency-weighted aggregation using Time2Vec encoding and multi-signal fusion
 
+🔀 **Multi-Hop Reasoning with Vector Pivots (v2.5)** - Logic-aware Retrieve-Reason-Prune pipeline using vector search as springboard for graph traversal with helpfulness scoring and pivot depth security
+
 🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchical retrieval with community detection and summarization; recursive traversals using optimized Datalog algorithms
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
@@ -1114,6 +1116,49 @@ Example:
 ```
 
 Returns deletion statistics showing exactly what was removed.
+
+## Multi-Hop Reasoning with Vector Pivots (v2.5)
+
+**Research-backed implementation** based on HopRAG (ACL 2025), Retrieval Pivot Attacks (arXiv:2602.08668), and Neo4j GraphRAG patterns.
+
+### Retrieve-Reason-Prune Pipeline
+
+1. **RETRIEVE**: Find semantic pivot points via HNSW vector search
+2. **REASON**: Logic-aware graph traversal with relationship context
+3. **PRUNE**: Helpfulness scoring combining textual similarity + logical importance
+4. **AGGREGATE**: Deduplicate and rank entities by occurrence and confidence
+
+### Key Features
+
+- **Logic-Aware Traversal**: Considers relationship types, strengths, and PageRank scores
+- **Helpfulness Scoring**: Combines semantic similarity (60%) + logical importance (40%)
+- **Pivot Depth Security**: Enforces max depth limit to prevent uncontrolled graph expansion
+- **Confidence Decay**: Exponential decay (0.9^depth) for recency weighting
+- **Adaptive Pruning**: Filters paths below confidence threshold
+
+### Usage Example
+
+```typescript
+const multiHop = new MultiHopVectorPivot(db, embeddingService);
+const result = await multiHop.multiHopVectorPivot(
+  "how does deep learning relate to NLP",
+  maxHops: 3,
+  limit: 10
+);
+
+// Returns:
+// - pivots: Initial vector search results
+// - paths: High-quality reasoning paths
+// - aggregated_results: Ranked entities with scores
+// - total_hops: Maximum traversal depth
+// - execution_time_ms: Performance metrics
+```
+
+### Research Foundation
+
+- **HopRAG (ACL 2025)**: Logic-aware RAG with pseudo-queries as edges, achieving 76.78% higher answer accuracy
+- **Retrieval Pivot Attacks**: Security patterns for hybrid RAG systems with boundary enforcement
+- **Neo4j GraphRAG**: Multi-hop reasoning patterns for knowledge graphs
 
 ## Technical Highlights
 

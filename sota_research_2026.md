@@ -81,26 +81,49 @@ async buildHNSWWithKeywords(nodes: Node[]) {
 }
 ```
 
-### 6. **Multi-Hop Reasoning mit Vector Pivots**
+### 6. **Multi-Hop Reasoning mit Vector Pivots** ✅ IMPLEMENTIERT (v2.5)
 
 **Pattern:** Nutze Vector Search als "Sprungbrett" für Graph-Traversierung
 
-**Für CozoDB Memory:**
+**Status:** Vollständig implementiert mit Logic-Aware Retrieve-Reason-Prune Pipeline
+
+**Implementierung:**
 ```typescript
-// Bereits teilweise implementiert, aber ausbaubar:
-async multiHopVectorPivot(query: string, maxHops: number) {
-  // 1. Vector Search für Startpunkte
-  const pivots = await vectorSearch(query);
+// src/multi-hop-vector-pivot.ts
+class MultiHopVectorPivot {
+  // Retrieve-Reason-Prune Pipeline:
+  // 1. RETRIEVE: Vector pivots via HNSW
+  // 2. REASON: Logic-aware graph traversal mit relationship context
+  // 3. PRUNE: Helpfulness scoring (textual similarity + logical importance)
+  // 4. AGGREGATE: Deduplicate und rank entities
   
-  // 2. Multi-Hop Graph Walk von jedem Pivot
-  const paths = await Promise.all(
-    pivots.map(p => graphWalk(p.id, maxHops))
-  );
-  
-  // 3. Re-Rank basierend auf Path-Qualität
-  return rerank(paths);
+  async multiHopVectorPivot(query: string, maxHops: number, limit: number) {
+    // 1. Vector Search für Startpunkte
+    const pivots = await this.findVectorPivots(query);
+    
+    // 2. Reasoning-Augmented Traversal von jedem Pivot
+    const paths = await this.reasoningAugmentedTraversal(pivots, query, maxHops);
+    
+    // 3. Prune by Helpfulness Score
+    const prunedPaths = this.prunePathsByHelpfulness(paths, query);
+    
+    // 4. Aggregate und Re-Rank
+    return this.aggregatePathResults(prunedPaths);
+  }
 }
 ```
+
+**Features:**
+- Logic-Aware Traversal: Berücksichtigt Relationship-Typen, Stärken und PageRank
+- Helpfulness Scoring: 60% textuelle Ähnlichkeit + 40% logische Wichtigkeit
+- Pivot Depth Security: Max-Depth-Limit gegen unkontrollierte Expansion
+- Confidence Decay: Exponentieller Decay (0.9^depth) für Recency-Weighting
+- Adaptive Pruning: Filtert Pfade unter Confidence-Threshold
+
+**Research Foundation:**
+- HopRAG (ACL 2025): 76.78% höhere Answer Accuracy
+- Retrieval Pivot Attacks (arXiv:2602.08668): Security Patterns
+- Neo4j GraphRAG: Multi-hop Reasoning Patterns
 
 ### 7. **Logical Edges from Knowledge Graph**
 

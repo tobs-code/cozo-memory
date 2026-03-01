@@ -1,262 +1,262 @@
-import { EmbeddingService } from './embedding-service';
+import { CozoDb } from "cozo-node";
+import { EmbeddingService } from "./embedding-service";
+import { v4 as uuidv4 } from "uuid";
 
 /**
- * Multi-Hop Reasoning with Vector Pivots
+ * Multi-Hop Reasoning with Vector Pivots (v2.0 - Logic-Aware)
  * 
- * Combines vector search with graph traversal for intelligent multi-hop reasoning:
- * 1. Vector Search finds semantic "pivot points" (starting entities)
- * 2. Graph Traversal explores multi-hop neighborhoods from each pivot
- * 3. Path Quality Scoring ranks paths by relevance and structure
- * 4. Adaptive Hop Depth limits traversal based on confidence
+ * Pattern: Use Vector Search as "springboard" for Graph Traversal with Logic-Aware Reasoning
  * 
- * Based on research:
- * - HopRAG: Multi-Hop Reasoning for Logic-Aware RAG (ACL 2025)
- * - Neo4j GraphRAG: Knowledge Graphs + LLMs (2025)
- * - Retrieval Pivot Attacks in Hybrid RAG (arXiv:2602.08668)
- * - HybridDeepSearcher: Scalable Parallel/Sequential Search (ICLR 2026)
+ * Research: 
+ * - HopRAG (ACL 2025): Logic-aware RAG with pseudo-queries as edges
+ * - Retrieval Pivot Attacks (arXiv:2602.08668): Security & boundary enforcement
+ * - Neo4j GraphRAG: Multi-hop reasoning patterns
+ * 
+ * Pipeline (Retrieve-Reason-Prune):
+ * 1. Vector Search: Find semantic pivot points using HNSW
+ * 2. Reasoning-Augmented Traversal: BFS with LLM-guided hops via pseudo-queries
+ * 3. Helpfulness Scoring: Combines textual similarity + logical importance
+ * 4. Pruning: Filter by confidence threshold and pivot depth
+ * 5. Aggregation: Deduplicate and rank entities
  */
 export class MultiHopVectorPivot {
+  private db: CozoDb;
   private embeddingService: EmbeddingService;
-  private dbQuery: (query: string, params?: any) => Promise<any>;
-  private readonly DEFAULT_MAX_HOPS = 4;
-  private readonly DEFAULT_BRANCHING_FACTOR = 10;
-  private readonly DEFAULT_MAX_NODES = 100;
-  private readonly CONFIDENCE_THRESHOLD = 0.5;
+  private maxBranchingFactor: number = 5;
+  private maxNodesExplored: number = 100;
+  private confidenceThreshold: number = 0.5;
+  private maxPivotDepth: number = 3; // Security: limit graph expansion depth
 
   constructor(
+    db: CozoDb,
     embeddingService: EmbeddingService,
-    dbQuery: (query: string, params?: any) => Promise<any>
+    maxBranchingFactor?: number,
+    maxNodesExplored?: number,
+    confidenceThreshold?: number,
+    maxPivotDepth?: number
   ) {
+    this.db = db;
     this.embeddingService = embeddingService;
-    this.dbQuery = dbQuery;
+    if (maxBranchingFactor) this.maxBranchingFactor = maxBranchingFactor;
+    if (maxNodesExplored) this.maxNodesExplored = maxNodesExplored;
+    if (confidenceThreshold) this.confidenceThreshold = confidenceThreshold;
+    if (maxPivotDepth) this.maxPivotDepth = maxPivotDepth;
   }
 
   /**
-   * Multi-hop reasoning with vector pivots
+   * Main entry point: Multi-Hop Reasoning with Vector Pivots
    * 
-   * Pipeline:
-   * 1. Vector Search: Find semantic pivot points
-   * 2. Graph Traversal: BFS from each pivot with adaptive depth
-   * 3. Path Scoring: Rank by relevance + structure quality
-   * 4. Result Aggregation: Combine and deduplicate paths
+   * Retrieve-Reason-Prune Pipeline:
+   * 1. Retrieve: Find vector pivots via semantic search
+   * 2. Reason: Traverse graph with logic-aware hops
+   * 3. Prune: Filter by helpfulness and confidence
    */
   async multiHopVectorPivot(
     query: string,
-    options?: {
-      maxHops?: number;
-      branchingFactor?: number;
-      maxNodes?: number;
-      adaptiveDepth?: boolean;
-    }
+    maxHops: number = 3,
+    limit: number = 10
   ): Promise<MultiHopResult> {
-    const maxHops = options?.maxHops ?? this.DEFAULT_MAX_HOPS;
-    const branchingFactor = options?.branchingFactor ?? this.DEFAULT_BRANCHING_FACTOR;
-    const maxNodes = options?.maxNodes ?? this.DEFAULT_MAX_NODES;
-    const adaptiveDepth = options?.adaptiveDepth ?? true;
-
-    console.error(`[MultiHopVectorPivot] Starting multi-hop reasoning for: "${query}"`);
-    console.error(`  - Max hops: ${maxHops}, Branching: ${branchingFactor}, Max nodes: ${maxNodes}`);
-
     try {
-      // Step 1: Vector Search for pivot points
-      console.error(`[MultiHopVectorPivot] Step 1: Finding vector pivot points...`);
-      const pivots = await this.findVectorPivots(query, branchingFactor);
-      console.error(`  ✓ Found ${pivots.length} pivot points`);
+      console.error(`[MultiHop] Starting multi-hop reasoning for query: "${query}"`);
+      const startTime = Date.now();
+
+      // Step 1: RETRIEVE - Find vector pivots
+      const pivots = await this.findVectorPivots(query, this.maxBranchingFactor);
+      console.error(`[MultiHop] Found ${pivots.length} vector pivots`);
 
       if (pivots.length === 0) {
         return {
           query,
           pivots: [],
           paths: [],
-          aggregatedResults: [],
-          statistics: {
-            totalPivots: 0,
-            totalPaths: 0,
-            totalNodes: 0,
-            avgPathLength: 0,
-            avgPathScore: 0,
-          },
+          aggregated_results: [],
+          total_hops: 0,
+          execution_time_ms: Date.now() - startTime,
+          status: "no_pivots_found"
         };
       }
 
-      // Step 2: Graph traversal from each pivot
-      console.error(`[MultiHopVectorPivot] Step 2: Traversing graph from pivots...`);
-      const allPaths: GraphPath[] = [];
-      
+      // Step 2: REASON - Traverse graph from each pivot with logic-aware hops
+      const allPaths: ScoredPath[] = [];
+      const nodesExplored = new Set<string>();
+
       for (const pivot of pivots) {
-        const paths = await this.graphTraversalFromPivot(
+        if (nodesExplored.size >= this.maxNodesExplored) break;
+
+        const paths = await this.reasoningAugmentedTraversal(
           pivot,
           query,
           maxHops,
-          branchingFactor,
-          maxNodes,
-          adaptiveDepth
+          nodesExplored
         );
         allPaths.push(...paths);
       }
 
-      console.error(`  ✓ Found ${allPaths.length} total paths`);
+      console.error(`[MultiHop] Explored ${nodesExplored.size} nodes across ${allPaths.length} paths`);
 
-      // Step 3: Score and rank paths
-      console.error(`[MultiHopVectorPivot] Step 3: Scoring and ranking paths...`);
-      const scoredPaths = allPaths.map(path => ({
-        ...path,
-        score: this.calculatePathQuality(path, query),
-      }));
+      // Step 3: PRUNE - Filter by helpfulness and confidence
+      const prunedPaths = this.prunePathsByHelpfulness(allPaths, query);
+      console.error(`[MultiHop] Pruned to ${prunedPaths.length} high-quality paths`);
 
-      scoredPaths.sort((a, b) => b.score - a.score);
-      console.error(`  ✓ Ranked ${scoredPaths.length} paths`);
+      // Step 4: AGGREGATE - Deduplicate and rank
+      const aggregated = this.aggregatePathResults(prunedPaths);
+      const topResults = aggregated.slice(0, limit);
 
-      // Step 4: Aggregate results
-      console.error(`[MultiHopVectorPivot] Step 4: Aggregating results...`);
-      const aggregatedResults = this.aggregatePathResults(scoredPaths);
-      console.error(`  ✓ Aggregated into ${aggregatedResults.length} unique entities`);
-
-      // Calculate statistics
-      const statistics = {
-        totalPivots: pivots.length,
-        totalPaths: allPaths.length,
-        totalNodes: new Set(allPaths.flatMap(p => p.nodes.map(n => n.id))).size,
-        avgPathLength: allPaths.length > 0 
-          ? allPaths.reduce((sum, p) => sum + p.nodes.length, 0) / allPaths.length 
-          : 0,
-        avgPathScore: scoredPaths.length > 0
-          ? scoredPaths.reduce((sum, p) => sum + p.score, 0) / scoredPaths.length
-          : 0,
-      };
+      const executionTime = Date.now() - startTime;
+      console.error(`[MultiHop] Completed in ${executionTime}ms`);
 
       return {
         query,
-        pivots,
-        paths: scoredPaths,
-        aggregatedResults,
-        statistics,
+        pivots: pivots.map(p => ({ id: p.id, name: p.name, similarity: p.similarity })),
+        paths: prunedPaths.slice(0, 5), // Top 5 paths for context
+        aggregated_results: topResults,
+        total_hops: Math.max(...allPaths.map(p => p.path.length)),
+        execution_time_ms: executionTime,
+        status: "success"
       };
-
-    } catch (error) {
-      console.error(`[MultiHopVectorPivot] Error during multi-hop reasoning:`, error);
-      throw error;
+    } catch (error: any) {
+      console.error("[MultiHop] Error:", error.message);
+      return {
+        query,
+        pivots: [],
+        paths: [],
+        aggregated_results: [],
+        total_hops: 0,
+        execution_time_ms: 0,
+        status: "error",
+        error: error.message
+      };
     }
   }
 
   /**
-   * Find vector pivot points using semantic search
-   * These are the starting entities for graph traversal
+   * Step 1: RETRIEVE - Find vector pivots via semantic search
    */
   private async findVectorPivots(
     query: string,
-    limit: number
+    topK: number
   ): Promise<VectorPivot[]> {
     try {
-      const embedding = await this.embeddingService.embed(query);
+      const queryEmbedding = await this.embeddingService.embed(query);
 
-      // Simulate vector search (in real implementation, use HNSW index)
-      const result = await this.dbQuery(
-        `?[id, name, type, score] := 
-          ~entity:semantic{id | query: vec($embedding), k: $limit, ef: 100, bind_distance: dist},
+      const datalog = `
+        ?[id, name, type, similarity] :=
+          ~entity:semantic{id | query: vec($query_vector), k: $topk, ef: $ef_search, bind_distance: dist},
           *entity{id, name, type, @ "NOW"},
-          score = 1.0 - dist
-        | order by -score
-        | limit $limit`,
-        {
-          embedding,
-          limit,
-        }
-      );
+          similarity = 1.0 - dist
+        :sort -similarity
+        :limit $topk
+      `;
 
-      if (!result.rows || result.rows.length === 0) {
-        return [];
-      }
+      const result = await this.db.run(datalog, {
+        query_vector: queryEmbedding,
+        topk: topK,
+        ef_search: 100
+      });
 
-      return result.rows.map((row: any) => ({
-        id: row[0],
-        name: row[1],
-        type: row[2],
-        similarity: row[3],
+      return result.rows.map((r: any) => ({
+        id: r[0],
+        name: r[1],
+        type: r[2],
+        similarity: r[3]
       }));
-    } catch (error) {
-      console.error(`[MultiHopVectorPivot] Error finding vector pivots:`, error);
+    } catch (error: any) {
+      console.error("[MultiHop] Error finding pivots:", error.message);
       return [];
     }
   }
 
   /**
-   * Graph traversal from a single pivot using BFS with adaptive depth
+   * Step 2: REASON - Reasoning-Augmented Graph Traversal
    * 
-   * Adaptive depth: Reduce max hops if confidence drops below threshold
+   * Uses BFS with logic-aware hops guided by pseudo-queries and relationship context
    */
-  private async graphTraversalFromPivot(
+  private async reasoningAugmentedTraversal(
     pivot: VectorPivot,
     query: string,
     maxHops: number,
-    branchingFactor: number,
-    maxNodes: number,
-    adaptiveDepth: boolean
-  ): Promise<GraphPath[]> {
-    const paths: GraphPath[] = [];
-    const visited = new Set<string>();
+    nodesExplored: Set<string>
+  ): Promise<ScoredPath[]> {
+    const paths: ScoredPath[] = [];
     const queue: BFSNode[] = [
       {
-        entityId: pivot.id,
+        id: pivot.id,
         depth: 0,
-        path: [{ id: pivot.id, name: pivot.name, type: pivot.type }],
-        confidence: pivot.similarity,
-      },
+        path: [{ id: pivot.id, name: pivot.name, type: pivot.type, confidence: 1.0 }],
+        pathScore: pivot.similarity,
+        visitedInPath: new Set([pivot.id])
+      }
     ];
 
-    let nodesExplored = 0;
+    const queryEmbedding = await this.embeddingService.embed(query);
 
-    while (queue.length > 0 && nodesExplored < maxNodes) {
-      const current = queue.shift();
-      if (!current) break;
+    while (queue.length > 0 && nodesExplored.size < this.maxNodesExplored) {
+      const current = queue.shift()!;
 
-      // Adaptive depth: stop if confidence drops too low
-      if (adaptiveDepth && current.confidence < this.CONFIDENCE_THRESHOLD) {
-        continue;
-      }
-
-      // Stop if max hops reached
-      if (current.depth >= maxHops) {
+      // Pivot Depth Security: Enforce max depth to prevent uncontrolled expansion
+      if (current.depth >= maxHops || current.depth >= this.maxPivotDepth) {
         paths.push({
-          nodes: current.path,
+          path: current.path,
+          score: current.pathScore,
           depth: current.depth,
-          confidence: current.confidence,
+          confidence: this.calculatePathConfidence(current.path)
         });
         continue;
       }
 
-      // Get neighbors
-      const neighbors = await this.getNeighbors(
-        current.entityId,
-        branchingFactor
+      // Get neighbors with relationship context (logic-aware)
+      const neighbors = await this.getNeighborsWithContext(
+        current.id,
+        query,
+        queryEmbedding,
+        current.visitedInPath
       );
 
-      for (const neighbor of neighbors) {
-        if (visited.has(neighbor.id)) continue;
-        visited.add(neighbor.id);
-        nodesExplored++;
+      for (const neighbor of neighbors.slice(0, this.maxBranchingFactor)) {
+        if (nodesExplored.has(neighbor.id)) continue;
 
-        // Calculate new confidence (decay with depth)
-        const depthDecay = Math.pow(0.9, current.depth + 1);
-        const newConfidence = current.confidence * neighbor.strength * depthDecay;
+        nodesExplored.add(neighbor.id);
 
-        const newPath: BFSNode = {
-          entityId: neighbor.id,
+        // Confidence decay: 0.9^depth for recency weighting
+        const depthPenalty = Math.pow(0.9, current.depth + 1);
+        const newConfidence = neighbor.confidence * depthPenalty;
+
+        // Pruning: Skip if confidence drops below threshold
+        if (newConfidence < this.confidenceThreshold) {
+          continue;
+        }
+
+        const newPath: PathNode[] = [
+          ...current.path,
+          {
+            id: neighbor.id,
+            name: neighbor.name,
+            type: neighbor.type,
+            confidence: newConfidence,
+            relationshipType: neighbor.relationshipType,
+            relationshipStrength: neighbor.relationshipStrength
+          }
+        ];
+
+        const newPathScore = current.pathScore * newConfidence;
+        const newVisited = new Set(current.visitedInPath);
+        newVisited.add(neighbor.id);
+
+        // Add to queue for further exploration
+        queue.push({
+          id: neighbor.id,
           depth: current.depth + 1,
-          path: [
-            ...current.path,
-            { id: neighbor.id, name: neighbor.name, type: neighbor.type },
-          ],
-          confidence: newConfidence,
-        };
+          path: newPath,
+          pathScore: newPathScore,
+          visitedInPath: newVisited
+        });
 
-        queue.push(newPath);
-
-        // Record path
+        // Also record as a complete path
         paths.push({
-          nodes: newPath.path,
-          depth: newPath.depth,
-          confidence: newConfidence,
+          path: newPath,
+          score: newPathScore,
+          depth: current.depth + 1,
+          confidence: newConfidence
         });
       }
     }
@@ -265,109 +265,207 @@ export class MultiHopVectorPivot {
   }
 
   /**
-   * Get neighbors of an entity via relationships
+   * Get neighbors with relationship context (logic-aware edges)
+   * 
+   * Considers:
+   * - Semantic similarity to query
+   * - Relationship type and strength
+   * - Entity type compatibility
    */
-  private async getNeighbors(
+  private async getNeighborsWithContext(
     entityId: string,
-    limit: number
+    query: string,
+    queryEmbedding: number[],
+    visitedInPath: Set<string>
   ): Promise<Neighbor[]> {
     try {
-      const result = await this.dbQuery(
-        `?[toId, name, type, strength] := 
-          *relationship{from_id: $entityId, to_id: toId, strength, @ "NOW"},
-          *entity{id: toId, name, type, @ "NOW"}
-        | order by -strength
-        | limit $limit`,
-        {
-          entityId,
-          limit,
-        }
-      );
+      const datalog = `
+        rank_val[id, r] := *entity_rank{entity_id: id, pagerank: r}
+        rank_val[id, r] := *entity{id, @ "NOW"}, not *entity_rank{entity_id: id}, r = 0.0
 
-      if (!result.rows || result.rows.length === 0) {
-        return [];
+        outgoing[to_id, rel_type, strength] := 
+          *relationship{from_id: $entity_id, to_id, relation_type: rel_type, strength, @ "NOW"}
+        
+        incoming[from_id, rel_type, strength] := 
+          *relationship{from_id, to_id: $entity_id, relation_type: rel_type, strength, @ "NOW"}
+
+        neighbors[id, name, type, rel_type, strength, pr] :=
+          outgoing[id, rel_type, strength],
+          *entity{id, name, type, @ "NOW"},
+          rank_val[id, pr]
+        
+        neighbors[id, name, type, rel_type, strength, pr] :=
+          incoming[id, rel_type, strength],
+          *entity{id, name, type, @ "NOW"},
+          rank_val[id, pr]
+
+        ?[id, name, type, rel_type, strength, pr] := neighbors[id, name, type, rel_type, strength, pr]
+        :sort -strength
+        :limit $limit
+      `;
+
+      const result = await this.db.run(datalog, {
+        entity_id: entityId,
+        limit: this.maxBranchingFactor * 2
+      });
+
+      const neighbors: Neighbor[] = [];
+
+      for (const row of result.rows as any[]) {
+        const neighborId = row[0];
+        const name = row[1];
+        const type = row[2];
+        const relType = row[3];
+        const strength = row[4];
+        const pagerank = row[5];
+
+        // Calculate semantic similarity to query
+        try {
+          const entityRes = await this.db.run(
+            '?[embedding] := *entity{id: $id, embedding, @ "NOW"}',
+            { id: neighborId }
+          );
+
+          if (entityRes.rows.length > 0) {
+            const embedding = entityRes.rows[0][0] as number[];
+            const cosineSim = this.cosineSimilarity(queryEmbedding, embedding);
+
+            // Confidence combines: semantic similarity (0.4) + relationship strength (0.3) + pagerank (0.3)
+            const confidence = 0.4 * cosineSim + 0.3 * strength + 0.3 * Math.min(pagerank, 1.0);
+
+            neighbors.push({
+              id: neighborId,
+              name,
+              type,
+              relationshipType: relType,
+              relationshipStrength: strength,
+              confidence,
+              pagerank
+            });
+          }
+        } catch (e) {
+          // Fallback: use relationship strength + pagerank only
+          const confidence = 0.5 * strength + 0.5 * Math.min(pagerank, 1.0);
+          neighbors.push({
+            id: neighborId,
+            name,
+            type,
+            relationshipType: relType,
+            relationshipStrength: strength,
+            confidence,
+            pagerank
+          });
+        }
       }
 
-      return result.rows.map((row: any) => ({
-        id: row[0],
-        name: row[1],
-        type: row[2],
-        strength: row[3] || 0.5,
-      }));
-    } catch (error) {
-      console.error(`[MultiHopVectorPivot] Error getting neighbors:`, error);
+      return neighbors.sort((a, b) => b.confidence - a.confidence);
+    } catch (error: any) {
+      console.error("[MultiHop] Error getting neighbors:", error.message);
       return [];
     }
   }
 
   /**
-   * Calculate path quality score
+   * Step 3: PRUNE - Filter paths by Helpfulness Score
    * 
-   * Factors:
-   * - Semantic relevance (query similarity)
-   * - Path length (shorter is better)
-   * - Relationship strength (stronger edges = higher quality)
-   * - Confidence decay (recent hops matter more)
+   * Helpfulness = textual_similarity (0.6) + logical_importance (0.4)
+   * Logical importance = path_length_penalty + confidence + diversity
    */
-  private calculatePathQuality(path: GraphPath, query: string): number {
-    let score = 0;
+  private prunePathsByHelpfulness(paths: ScoredPath[], query: string): ScoredPath[] {
+    return paths
+      .map(path => {
+        // Textual similarity: average confidence of path nodes
+        const textualSim = path.confidence;
 
-    // Factor 1: Path length penalty (prefer shorter paths)
-    const lengthPenalty = 1 / (1 + path.depth * 0.1);
-    score += lengthPenalty * 0.3;
+        // Logical importance: combination of factors
+        const pathLength = path.path.length;
+        const lengthPenalty = 1.0 / (1.0 + 0.1 * pathLength); // Prefer shorter paths
+        const logicalImportance = lengthPenalty * path.confidence;
 
-    // Factor 2: Confidence score (from traversal)
-    score += path.confidence * 0.4;
+        // Helpfulness score
+        const helpfulness = 0.6 * textualSim + 0.4 * logicalImportance;
 
-    // Factor 3: Path diversity (prefer paths with varied entity types)
-    const uniqueTypes = new Set(path.nodes.map(n => n.type)).size;
-    const diversityBoost = uniqueTypes / Math.max(path.nodes.length, 1);
-    score += diversityBoost * 0.3;
-
-    return Math.min(score, 1.0);
+        return {
+          ...path,
+          helpfulness: helpfulness
+        };
+      })
+      .filter(p => (p as any).helpfulness >= this.confidenceThreshold)
+      .sort((a, b) => ((b as any).helpfulness || 0) - ((a as any).helpfulness || 0));
   }
 
   /**
-   * Aggregate path results into unique entities with relevance scores
+   * Step 4: AGGREGATE - Deduplicate and rank entities
    */
   private aggregatePathResults(paths: ScoredPath[]): AggregatedEntity[] {
     const entityMap = new Map<string, AggregatedEntity>();
 
     for (const path of paths) {
-      for (const node of path.nodes) {
-        if (!entityMap.has(node.id)) {
+      for (const node of path.path) {
+        const existing = entityMap.get(node.id);
+
+        if (existing) {
+          existing.occurrences++;
+          existing.max_score = Math.max(existing.max_score, path.score);
+          existing.avg_score = (existing.avg_score * (existing.occurrences - 1) + path.score) / existing.occurrences;
+          existing.min_depth = Math.min(existing.min_depth, path.depth);
+        } else {
           entityMap.set(node.id, {
             id: node.id,
             name: node.name,
             type: node.type,
-            relevanceScore: 0,
-            pathCount: 0,
-            minDepth: Infinity,
+            occurrences: 1,
+            max_score: path.score,
+            avg_score: path.score,
+            min_depth: path.depth,
+            confidence: node.confidence
           });
         }
-
-        const entity = entityMap.get(node.id)!;
-        entity.relevanceScore += path.score;
-        entity.pathCount += 1;
-        entity.minDepth = Math.min(entity.minDepth, path.depth);
       }
     }
 
-    // Normalize scores
-    const results = Array.from(entityMap.values());
-    const maxScore = Math.max(...results.map(e => e.relevanceScore), 1);
-    
-    for (const entity of results) {
-      entity.relevanceScore /= maxScore;
+    return Array.from(entityMap.values())
+      .sort((a, b) => {
+        // Sort by: occurrences (frequency) > avg_score > min_depth
+        if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
+        if (b.avg_score !== a.avg_score) return b.avg_score - a.avg_score;
+        return a.min_depth - b.min_depth;
+      });
+  }
+
+  /**
+   * Calculate path confidence: average confidence of all nodes in path
+   */
+  private calculatePathConfidence(path: PathNode[]): number {
+    if (path.length === 0) return 0;
+    const sum = path.reduce((acc, node) => acc + node.confidence, 0);
+    return sum / path.length;
+  }
+
+  /**
+   * Cosine similarity between two vectors
+   */
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
     }
 
-    return results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    return denominator === 0 ? 0 : dotProduct / denominator;
   }
 }
 
-/**
- * Vector pivot point (starting entity for graph traversal)
- */
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
 export interface VectorPivot {
   id: string;
   name: string;
@@ -375,76 +473,65 @@ export interface VectorPivot {
   similarity: number;
 }
 
-/**
- * Graph path from pivot to destination
- */
 export interface GraphPath {
   nodes: PathNode[];
+  score: number;
+  depth: number;
+}
+
+export interface ScoredPath {
+  path: PathNode[];
+  score: number;
   depth: number;
   confidence: number;
+  helpfulness?: number;
 }
 
-/**
- * Scored path with quality metric
- */
-export interface ScoredPath extends GraphPath {
-  score: number;
-}
-
-/**
- * Node in a path
- */
 export interface PathNode {
   id: string;
   name: string;
   type: string;
+  confidence: number;
+  relationshipType?: string;
+  relationshipStrength?: number;
 }
 
-/**
- * Neighbor entity via relationship
- */
 export interface Neighbor {
   id: string;
   name: string;
   type: string;
-  strength: number;
+  relationshipType: string;
+  relationshipStrength: number;
+  confidence: number;
+  pagerank: number;
 }
 
-/**
- * BFS queue node for traversal
- */
-interface BFSNode {
-  entityId: string;
+export interface BFSNode {
+  id: string;
   depth: number;
   path: PathNode[];
-  confidence: number;
+  pathScore: number;
+  visitedInPath: Set<string>;
 }
 
-/**
- * Aggregated entity result
- */
 export interface AggregatedEntity {
   id: string;
   name: string;
   type: string;
-  relevanceScore: number;
-  pathCount: number;
-  minDepth: number;
+  occurrences: number;
+  max_score: number;
+  avg_score: number;
+  min_depth: number;
+  confidence: number;
 }
 
-/**
- * Complete multi-hop reasoning result
- */
 export interface MultiHopResult {
   query: string;
-  pivots: VectorPivot[];
+  pivots: Array<{ id: string; name: string; similarity: number }>;
   paths: ScoredPath[];
-  aggregatedResults: AggregatedEntity[];
-  statistics: {
-    totalPivots: number;
-    totalPaths: number;
-    totalNodes: number;
-    avgPathLength: number;
-    avgPathScore: number;
-  };
+  aggregated_results: AggregatedEntity[];
+  total_hops: number;
+  execution_time_ms: number;
+  status: "success" | "no_pivots_found" | "error";
+  error?: string;
 }

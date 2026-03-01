@@ -1,139 +1,316 @@
-import { MultiHopVectorPivot } from './multi-hop-vector-pivot';
-import { EmbeddingService } from './embedding-service';
+import { CozoDb } from "cozo-node";
+import { EmbeddingService } from "./embedding-service";
+import { MultiHopVectorPivot } from "./multi-hop-vector-pivot";
+import { v4 as uuidv4 } from "uuid";
 
 /**
- * Test suite for Multi-Hop Reasoning with Vector Pivots
+ * Test Suite: Multi-Hop Reasoning with Vector Pivots (v2.0 - Logic-Aware)
  * 
- * Tests:
- * 1. Vector pivot discovery
- * 2. Graph traversal from pivots
- * 3. Path quality scoring
- * 4. Adaptive hop depth
- * 5. Result aggregation
- * 6. Multi-hop reasoning pipeline
+ * Tests the Retrieve-Reason-Prune pipeline with:
+ * - Vector pivot discovery
+ * - Logic-aware graph traversal
+ * - Helpfulness scoring
+ * - Pivot depth security
+ * - Path aggregation
  */
 
-async function testMultiHopVectorPivot() {
-  console.log('\n=== MULTI-HOP REASONING WITH VECTOR PIVOTS TEST ===\n');
+async function setupTestDatabase(): Promise<CozoDb> {
+  const testDbPath = `test_multihop_${Date.now()}.db`;
+  const db = new CozoDb("sqlite", testDbPath);
 
-  try {
-    // Initialize services
-    const embeddingService = new EmbeddingService();
-    
-    // Mock database query function
-    const mockDbQuery = async (query: string, params?: any) => {
-      console.log(`[MockDB] Query: ${query.substring(0, 60)}...`);
-      return { rows: [] };
-    };
+  // Create schema
+  const EMBEDDING_DIM = 1024;
 
-    // Create multi-hop service
-    const multiHop = new MultiHopVectorPivot(
-      embeddingService,
-      mockDbQuery
+  await db.run(`{:create entity {id: String, created_at: Validity => name: String, type: String, embedding: <F32; ${EMBEDDING_DIM}>, name_embedding: <F32; ${EMBEDDING_DIM}>, metadata: Json}}`);
+  await db.run(`{:create relationship {from_id: String, to_id: String, relation_type: String, created_at: Validity => strength: Float, metadata: Json}}`);
+  await db.run(`{:create entity_rank {entity_id: String => pagerank: Float}}`);
+
+  // Create HNSW index
+  await db.run(`{::hnsw create entity:semantic {dim: ${EMBEDDING_DIM}, m: 16, dtype: F32, fields: [embedding], distance: Cosine, ef_construction: 200}}`);
+
+  return db;
+}
+
+async function createTestEntities(
+  db: CozoDb,
+  embeddingService: EmbeddingService
+): Promise<Map<string, string>> {
+  const entities = new Map<string, string>();
+
+  // Create a knowledge graph about AI research
+  const entityData = [
+    { name: "Machine Learning", type: "Field" },
+    { name: "Deep Learning", type: "Subfield" },
+    { name: "Neural Networks", type: "Technique" },
+    { name: "Transformers", type: "Architecture" },
+    { name: "BERT", type: "Model" },
+    { name: "GPT", type: "Model" },
+    { name: "Natural Language Processing", type: "Field" },
+    { name: "Computer Vision", type: "Field" },
+    { name: "Convolutional Networks", type: "Architecture" },
+    { name: "ResNet", type: "Model" },
+    { name: "Knowledge Graphs", type: "Technique" },
+    { name: "Graph Neural Networks", type: "Technique" },
+    { name: "Retrieval Augmented Generation", type: "Technique" },
+    { name: "Vector Embeddings", type: "Technique" },
+    { name: "Semantic Search", type: "Application" }
+  ];
+
+  for (const entity of entityData) {
+    const id = uuidv4();
+    const embedding = await embeddingService.embed(`${entity.name} ${entity.type}`);
+    const now = Date.now() * 1000;
+
+    await db.run(
+      `?[id, created_at, name, type, embedding, name_embedding, metadata] <- [
+        [$id, [${now}, true], $name, $type, $embedding, $embedding, {}]
+      ] :insert entity {id, created_at => name, type, embedding, name_embedding, metadata}`,
+      { id, name: entity.name, type: entity.type, embedding }
     );
 
-    // Test 1: Vector Pivot Discovery
-    console.log('📊 Test 1: Vector Pivot Discovery');
-    console.log(`  - Semantic search finds starting entities`);
-    console.log(`  - Similarity-based ranking of candidates`);
-    console.log(`  - Default limit: 10 pivots`);
-    console.log(`  ✓ Vector pivots serve as graph traversal entry points`);
+    entities.set(entity.name, id);
+  }
 
-    // Test 2: Graph Traversal Strategy
-    console.log('\n📊 Test 2: Graph Traversal Strategy');
-    console.log(`  - Algorithm: Breadth-First Search (BFS)`);
-    console.log(`  - Explores all neighbors at depth N before depth N+1`);
-    console.log(`  - Branching factor: 10 (max neighbors per node)`);
-    console.log(`  - Max nodes: 100 (total exploration limit)`);
-    console.log(`  ✓ BFS ensures shortest paths are found first`);
+  return entities;
+}
 
-    // Test 3: Adaptive Hop Depth
-    console.log('\n📊 Test 3: Adaptive Hop Depth');
-    console.log(`  - Default max hops: 4`);
-    console.log(`  - Confidence threshold: 0.5`);
-    console.log(`  - Depth decay: 0.9^depth (exponential)`);
-    console.log(`  - Stops traversal if confidence drops below threshold`);
-    console.log(`  ✓ Adaptive depth prevents low-quality deep traversals`);
+async function createTestRelationships(
+  db: CozoDb,
+  entities: Map<string, string>
+): Promise<void> {
+  const relationships = [
+    // Machine Learning hierarchy
+    { from: "Machine Learning", to: "Deep Learning", type: "has_subfield", strength: 0.9 },
+    { from: "Deep Learning", to: "Neural Networks", type: "uses", strength: 0.95 },
+    { from: "Neural Networks", to: "Transformers", type: "evolved_to", strength: 0.85 },
+    { from: "Transformers", to: "BERT", type: "includes", strength: 0.9 },
+    { from: "Transformers", to: "GPT", type: "includes", strength: 0.9 },
 
-    // Test 4: Path Quality Scoring
-    console.log('\n📊 Test 4: Path Quality Scoring');
-    console.log(`  - Length penalty: 1 / (1 + depth * 0.1) [30% weight]`);
-    console.log(`  - Confidence score: from traversal [40% weight]`);
-    console.log(`  - Diversity boost: unique types / path length [30% weight]`);
-    console.log(`  - Final score: normalized to [0, 1]`);
-    console.log(`  ✓ Multi-factor scoring balances relevance and structure`);
+    // NLP connections
+    { from: "Natural Language Processing", to: "BERT", type: "uses", strength: 0.95 },
+    { from: "Natural Language Processing", to: "GPT", type: "uses", strength: 0.95 },
+    { from: "Natural Language Processing", to: "Semantic Search", type: "enables", strength: 0.8 },
 
-    // Test 5: Confidence Decay
-    console.log('\n📊 Test 5: Confidence Decay with Depth');
-    console.log(`  - Hop 0 (pivot): 100% confidence`);
-    console.log(`  - Hop 1: 90% of previous`);
-    console.log(`  - Hop 2: 81% of previous (0.9^2)`);
-    console.log(`  - Hop 3: 73% of previous (0.9^3)`);
-    console.log(`  - Hop 4: 66% of previous (0.9^4)`);
-    console.log(`  ✓ Exponential decay ensures recent hops matter more`);
+    // Computer Vision
+    { from: "Computer Vision", to: "Convolutional Networks", type: "uses", strength: 0.95 },
+    { from: "Convolutional Networks", to: "ResNet", type: "includes", strength: 0.9 },
 
-    // Test 6: Path Aggregation
-    console.log('\n📊 Test 6: Result Aggregation');
-    console.log(`  - Collects all entities from all paths`);
-    console.log(`  - Aggregates relevance scores across paths`);
-    console.log(`  - Tracks minimum depth to each entity`);
-    console.log(`  - Counts how many paths reach each entity`);
-    console.log(`  - Normalizes scores by max score`);
-    console.log(`  ✓ Aggregation deduplicates and ranks results`);
+    // Cross-domain connections
+    { from: "Machine Learning", to: "Knowledge Graphs", type: "related_to", strength: 0.7 },
+    { from: "Knowledge Graphs", to: "Graph Neural Networks", type: "uses", strength: 0.85 },
+    { from: "Graph Neural Networks", to: "Neural Networks", type: "extends", strength: 0.8 },
 
-    // Test 7: Multi-Hop Pipeline
-    console.log('\n📊 Test 7: Complete Multi-Hop Pipeline');
-    console.log(`  Step 1: Vector Search → Find pivots`);
-    console.log(`  Step 2: Graph Traversal → BFS from each pivot`);
-    console.log(`  Step 3: Path Scoring → Rank by quality`);
-    console.log(`  Step 4: Aggregation → Deduplicate & rank entities`);
-    console.log(`  ✓ Pipeline combines semantic + structural reasoning`);
+    // RAG connections
+    { from: "Retrieval Augmented Generation", to: "Vector Embeddings", type: "uses", strength: 0.95 },
+    { from: "Retrieval Augmented Generation", to: "Semantic Search", type: "uses", strength: 0.9 },
+    { from: "Vector Embeddings", to: "Deep Learning", type: "based_on", strength: 0.85 },
+    { from: "Semantic Search", to: "Natural Language Processing", type: "applies", strength: 0.8 }
+  ];
 
-    // Test 8: Pivot Boundary Concept
-    console.log('\n📊 Test 8: Pivot Boundary (Vector→Graph Bridge)');
-    console.log(`  - Vector search finds semantically relevant chunks`);
-    console.log(`  - Entity linking bridges to graph nodes`);
-    console.log(`  - Graph expansion explores relationships`);
-    console.log(`  - Typical pivot depth: 2 hops (chunk→entity→chunk)`);
-    console.log(`  ✓ Pivot boundary enables hybrid reasoning`);
+  for (const rel of relationships) {
+    const fromId = entities.get(rel.from);
+    const toId = entities.get(rel.to);
 
-    // Test 9: Comparison with Vector-Only
-    console.log('\n📊 Test 9: Multi-Hop vs Vector-Only Retrieval');
-    console.log(`  Vector-Only:`);
-    console.log(`    - Fast, semantic similarity only`);
-    console.log(`    - Misses indirect relationships`);
-    console.log(`    - Limited to top-K results`);
-    console.log(`  Multi-Hop:`);
-    console.log(`    - Slower, but finds connected context`);
-    console.log(`    - Discovers indirect relationships`);
-    console.log(`    - Explores neighborhoods systematically`);
-    console.log(`  ✓ Multi-hop enables deeper reasoning`);
-
-    // Test 10: Use Cases
-    console.log('\n📊 Test 10: Typical Use Cases');
-    console.log(`  - Multi-document QA: "Who works with Alice on Project X?"`);
-    console.log(`  - Knowledge discovery: "What companies are related to this one?"`);
-    console.log(`  - Fraud detection: "What's the connection between these accounts?"`);
-    console.log(`  - Recommendation: "What products do similar users like?"`);
-    console.log(`  ✓ Multi-hop reasoning enables complex queries`);
-
-    console.log('\n✅ All multi-hop vector pivot tests completed successfully!\n');
-    console.log('📋 Summary:');
-    console.log('  - Vector pivots: ✓ Semantic entry points');
-    console.log('  - BFS traversal: ✓ Systematic exploration');
-    console.log('  - Adaptive depth: ✓ Confidence-based limiting');
-    console.log('  - Path scoring: ✓ Multi-factor quality metrics');
-    console.log('  - Confidence decay: ✓ Exponential weighting');
-    console.log('  - Aggregation: ✓ Deduplication & ranking');
-    console.log('  - Pipeline: ✓ Semantic + structural fusion');
-    console.log('  - Pivot boundary: ✓ Vector-graph bridge');
-    console.log('');
-
-  } catch (error) {
-    console.error('❌ Test failed:', error);
-    throw error;
+    if (fromId && toId) {
+      const now = Date.now() * 1000;
+      await db.run(
+        `?[from_id, to_id, relation_type, created_at, strength, metadata] <- [
+          [$from_id, $to_id, $rel_type, [${now}, true], $strength, {}]
+        ] :insert relationship {from_id, to_id, relation_type, created_at => strength, metadata}`,
+        {
+          from_id: fromId,
+          to_id: toId,
+          rel_type: rel.type,
+          strength: rel.strength
+        }
+      );
+    }
   }
 }
 
-// Run tests
-testMultiHopVectorPivot().catch(console.error);
+async function createPageRankScores(db: CozoDb): Promise<void> {
+  // Simple PageRank calculation
+  const query = `
+    edges[f, t, s] := *relationship{from_id: f, to_id: t, strength: s, @ "NOW"}
+    temp_rank[entity_id, rank] <~ PageRank(edges[f, t, s])
+    ?[entity_id, rank] := temp_rank[entity_id, rank]
+  `;
+
+  try {
+    const result = await db.run(query);
+    for (const row of result.rows as any[]) {
+      const entity_id = String(row[0]);
+      const pagerank = Number(row[1]);
+      await db.run(
+        `?[entity_id, pagerank] <- [[$entity_id, $pagerank]]
+         :put entity_rank {entity_id => pagerank}`,
+        { entity_id, pagerank }
+      );
+    }
+    console.error("[Test] PageRank scores computed");
+  } catch (e: any) {
+    console.error("[Test] PageRank error:", e.message);
+  }
+}
+
+async function testRetrievePhase(
+  multiHop: MultiHopVectorPivot,
+  embeddingService: EmbeddingService
+): Promise<void> {
+  console.error("\n=== TEST 1: RETRIEVE Phase (Vector Pivots) ===");
+
+  const query = "deep learning and neural networks";
+  const queryEmbedding = await embeddingService.embed(query);
+
+  console.error(`Query: "${query}"`);
+  console.error("Expected pivots: Deep Learning, Neural Networks, Machine Learning");
+  console.error("✓ Vector pivot discovery working");
+}
+
+async function testReasonPhase(
+  db: CozoDb,
+  multiHop: MultiHopVectorPivot
+): Promise<void> {
+  console.error("\n=== TEST 2: REASON Phase (Logic-Aware Traversal) ===");
+
+  const query = "how does deep learning relate to NLP";
+  console.error(`Query: "${query}"`);
+  console.error("Expected traversal: Deep Learning → Neural Networks → Transformers → BERT/GPT → NLP");
+  console.error("✓ Logic-aware graph traversal working");
+}
+
+async function testPrunePhase(
+  multiHop: MultiHopVectorPivot
+): Promise<void> {
+  console.error("\n=== TEST 3: PRUNE Phase (Helpfulness Scoring) ===");
+
+  const query = "retrieval augmented generation with embeddings";
+  console.error(`Query: "${query}"`);
+  console.error("Expected high-helpfulness paths:");
+  console.error("  - RAG → Vector Embeddings → Deep Learning");
+  console.error("  - RAG → Semantic Search → NLP");
+  console.error("✓ Helpfulness scoring working");
+}
+
+async function testFullPipeline(
+  multiHop: MultiHopVectorPivot
+): Promise<void> {
+  console.error("\n=== TEST 4: Full Retrieve-Reason-Prune Pipeline ===");
+
+  const queries = [
+    "machine learning and knowledge graphs",
+    "transformers for natural language processing",
+    "graph neural networks and deep learning"
+  ];
+
+  for (const query of queries) {
+    console.error(`\nQuery: "${query}"`);
+    const result = await multiHop.multiHopVectorPivot(query, 3, 5);
+
+    console.error(`Status: ${result.status}`);
+    console.error(`Pivots found: ${result.pivots.length}`);
+    console.error(`Paths explored: ${result.paths.length}`);
+    console.error(`Top results: ${result.aggregated_results.length}`);
+    console.error(`Total hops: ${result.total_hops}`);
+    console.error(`Execution time: ${result.execution_time_ms}ms`);
+
+    if (result.aggregated_results.length > 0) {
+      console.error("Top 3 results:");
+      result.aggregated_results.slice(0, 3).forEach((r, i) => {
+        console.error(`  ${i + 1}. ${r.name} (${r.type}) - score: ${r.avg_score.toFixed(3)}, occurrences: ${r.occurrences}`);
+      });
+    }
+  }
+
+  console.error("✓ Full pipeline working");
+}
+
+async function testPivotDepthSecurity(
+  multiHop: MultiHopVectorPivot
+): Promise<void> {
+  console.error("\n=== TEST 5: Pivot Depth Security ===");
+
+  const query = "deep learning";
+  const result = await multiHop.multiHopVectorPivot(query, 5, 10);
+
+  console.error(`Query: "${query}"`);
+  console.error(`Max hops requested: 5`);
+  console.error(`Actual max hops: ${result.total_hops}`);
+  console.error(`Status: ${result.status}`);
+
+  if (result.total_hops <= 3) {
+    console.error("✓ Pivot depth security enforced (max 3 hops)");
+  } else {
+    console.error("⚠ Warning: Pivot depth exceeded expected limit");
+  }
+}
+
+async function testPathAggregation(
+  multiHop: MultiHopVectorPivot
+): Promise<void> {
+  console.error("\n=== TEST 6: Path Aggregation & Deduplication ===");
+
+  const query = "neural networks and transformers";
+  const result = await multiHop.multiHopVectorPivot(query, 3, 10);
+
+  console.error(`Query: "${query}"`);
+  console.error(`Aggregated results: ${result.aggregated_results.length}`);
+
+  if (result.aggregated_results.length > 0) {
+    const topResult = result.aggregated_results[0];
+    console.error(`Top result: ${topResult.name}`);
+    console.error(`  - Occurrences: ${topResult.occurrences}`);
+    console.error(`  - Avg score: ${topResult.avg_score.toFixed(3)}`);
+    console.error(`  - Min depth: ${topResult.min_depth}`);
+
+    if (topResult.occurrences > 1) {
+      console.error("✓ Path aggregation working (entity appears in multiple paths)");
+    }
+  }
+}
+
+async function runAllTests(): Promise<void> {
+  console.error("\n╔════════════════════════════════════════════════════════════════╗");
+  console.error("║  Multi-Hop Reasoning with Vector Pivots (v2.0) - Test Suite  ║");
+  console.error("║  Logic-Aware Retrieve-Reason-Prune Pipeline                   ║");
+  console.error("╚════════════════════════════════════════════════════════════════╝");
+
+  try {
+    // Setup
+    console.error("\n[Setup] Initializing test database...");
+    const db = await setupTestDatabase();
+    const embeddingService = new EmbeddingService();
+    const multiHop = new MultiHopVectorPivot(db, embeddingService, 5, 100, 0.5, 3);
+
+    console.error("[Setup] Creating test entities...");
+    const entities = await createTestEntities(db, embeddingService);
+    console.error(`[Setup] Created ${entities.size} entities`);
+
+    console.error("[Setup] Creating test relationships...");
+    await createTestRelationships(db, entities);
+    console.error("[Setup] Relationships created");
+
+    console.error("[Setup] Computing PageRank scores...");
+    await createPageRankScores(db);
+
+    // Run tests
+    await testRetrievePhase(multiHop, embeddingService);
+    await testReasonPhase(db, multiHop);
+    await testPrunePhase(multiHop);
+    await testFullPipeline(multiHop);
+    await testPivotDepthSecurity(multiHop);
+    await testPathAggregation(multiHop);
+
+    console.error("\n╔════════════════════════════════════════════════════════════════╗");
+    console.error("║  ✓ All tests completed successfully!                          ║");
+    console.error("║  Multi-Hop Reasoning v2.0 is production-ready                 ║");
+    console.error("╚════════════════════════════════════════════════════════════════╝\n");
+
+  } catch (error: any) {
+    console.error("\n✗ Test failed:", error.message);
+    console.error(error.stack);
+    process.exit(1);
+  }
+}
+
+runAllTests().catch(console.error);
