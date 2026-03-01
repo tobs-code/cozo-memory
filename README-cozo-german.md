@@ -56,6 +56,10 @@ npm run start
 
 🔍 **Hybrid-Suche (seit v0.7)** - Kombination aus semantischer Suche (HNSW), Full-Text Search (FTS) und Graph-Signalen via Reciprocal Rank Fusion (RRF)
 
+🔀 **Dynamic Fusion Framework (v2.3)** - Fortgeschrittenes 4-Pfad-Retrieval-System, das Dense Vector, Sparse Vector, FTS und Graph-Traversal mit konfigurierbaren Gewichten und Fusion-Strategien (RRF, Weighted Sum, Max, Adaptive) kombiniert
+
+⏳ **Temporal Graph Neural Networks (v2.4)** - Zeitbewusste Node-Embeddings, die historischen Kontext, zeitliche Glätte und Recency-gewichtete Aggregation mittels Time2Vec-Encoding und Multi-Signal-Fusion erfassen
+
 🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchisches Retrieval mit Community-Detection und Summarization; rekursive Traversals via optimierte Datalog-Algorithmen
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.
@@ -533,6 +537,7 @@ Aktionen:
 - `graph_rag`: `{ query, max_depth?, limit?, filters?, rerank? }` Graph-basiertes Reasoning. Findet erst Vektor-Seeds (mit Inline-Filtering) und expandiert dann transitive Beziehungen. Nutzt rekursives Datalog für effiziente BFS-Expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Rekursive semantische Graph-Suche. Startet bei Vektor-Seeds oder einer spezifischen Entität und folgt Beziehungen zu anderen semantisch relevanten Entitäten. Ideal für tiefere Pfad-Exploration.
 - `agentic_search`: `{ query, limit?, rerank? }` **(Neu v2.0)**: **Auto-Routing Suche**. Nutzt ein lokales LLM (Ollama), um den Query-Intent zu analysieren und routet die Anfrage automatisch zur am besten geeigneten Strategie (`vector_search`, `graph_walk`, oder `community_summary`).
+- `dynamic_fusion`: `{ query, config?, limit? }` **(Neu v2.3)**: **Dynamic Fusion Framework**. Kombiniert 4 Retrieval-Pfade (Dense Vector, Sparse Vector, FTS, Graph) mit konfigurierbaren Gewichten und Fusion-Strategien. Inspiriert von Allan-Poe (arXiv:2511.00855).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Zeigt die zeitliche Entwicklung von Beziehungen inklusive Zeitbereichs-Filter und Diff-Zusammenfassung.
 
 Wichtige Details:
@@ -579,6 +584,81 @@ Beispiele:
 ```json
 { "action": "entity_details", "entity_id": "ENTITY_ID", "as_of": "2026-02-01T12:00:00Z" }
 ```
+
+#### Dynamic Fusion Framework (v2.3)
+
+Das Dynamic Fusion Framework kombiniert 4 Retrieval-Pfade mit konfigurierbaren Gewichten und Fusion-Strategien:
+
+**Retrieval-Pfade:**
+1. **Dense Vector Search (HNSW)**: Semantische Ähnlichkeit via Embeddings
+2. **Sparse Vector Search**: Keyword-basiertes Matching mit TF-IDF Scoring
+3. **Full-Text Search (FTS)**: BM25 Scoring auf Entity-Namen
+4. **Graph Traversal**: Multi-Hop Beziehungsexpansion von Vektor-Seeds
+
+**Fusion-Strategien:**
+- `rrf` (Reciprocal Rank Fusion): Kombiniert Rankings mit positionsbasiertem Scoring
+- `weighted_sum`: Direkte gewichtete Kombination von Scores
+- `max`: Nimmt maximalen Score über alle Pfade
+- `adaptive`: Query-abhängige Gewichtung (zukünftige Erweiterung)
+
+**Konfigurations-Beispiel:**
+
+```json
+{
+  "action": "dynamic_fusion",
+  "query": "Datenbank mit Graph-Fähigkeiten",
+  "limit": 10,
+  "config": {
+    "vector": {
+      "enabled": true,
+      "weight": 0.4,
+      "topK": 20,
+      "efSearch": 100
+    },
+    "sparse": {
+      "enabled": true,
+      "weight": 0.3,
+      "topK": 20,
+      "minScore": 0.1
+    },
+    "fts": {
+      "enabled": true,
+      "weight": 0.2,
+      "topK": 20,
+      "fuzzy": true
+    },
+    "graph": {
+      "enabled": true,
+      "weight": 0.1,
+      "maxDepth": 2,
+      "maxResults": 20,
+      "relationTypes": ["related_to", "uses"]
+    },
+    "fusion": {
+      "strategy": "rrf",
+      "rrfK": 60,
+      "minScore": 0.0,
+      "deduplication": true
+    }
+  }
+}
+```
+
+**Antwort enthält:**
+- `results`: Fusionierte und gerankte Ergebnisse mit Pfad-Beitrags-Details
+- `stats`: Performance-Metriken inklusive:
+  - `totalResults`: Anzahl der Ergebnisse nach Fusion
+  - `pathContributions`: Anzahl der Ergebnisse pro Pfad
+  - `fusionTime`: Gesamte Ausführungszeit
+  - `pathTimes`: Individuelle Ausführungszeiten pro Pfad
+
+**Anwendungsfälle:**
+- **Breite Exploration**: Alle Pfade aktiviert mit ausgewogenen Gewichten
+- **Präzisions-Suche**: Hohes Vektor-Gewicht, niedriges Graph-Gewicht
+- **Beziehungs-Entdeckung**: Hohes Graph-Gewicht mit spezifischen Beziehungstypen
+- **Keyword-Matching**: Hohe Sparse/FTS-Gewichte für exakte Term-Übereinstimmung
+
+```json
 
 #### Konflikterkennung (Status)
 

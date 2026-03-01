@@ -59,6 +59,10 @@ Now you can add the server to your MCP client (e.g. Claude Desktop).
 
 🔍 **Hybrid Search (since v0.7)** - Combines semantic search (HNSW), full-text search (FTS), and graph signals via Reciprocal Rank Fusion (RRF)
 
+🔀 **Dynamic Fusion Framework (v2.3)** - Advanced 4-path retrieval system combining Dense Vector, Sparse Vector, FTS, and Graph traversal with configurable weights and fusion strategies (RRF, Weighted Sum, Max, Adaptive)
+
+⏳ **Temporal Graph Neural Networks (v2.4)** - Time-aware node embeddings capturing historical context, temporal smoothness, and recency-weighted aggregation using Time2Vec encoding and multi-signal fusion
+
 🕸️ **Graph-RAG & Graph-Walking (v1.7/v2.0)** - Hierarchical retrieval with community detection and summarization; recursive traversals using optimized Datalog algorithms
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-routing engine that analyzes query intent via local LLM to select the optimal search strategy (Vector, Graph, or Community)
@@ -416,6 +420,95 @@ const index = await VectorStoreIndex.fromDocuments(
 
 **Documentation:** See [adapters/README.md](./adapters/README.md) for complete examples and API reference.
 
+## Temporal Graph Neural Networks (v2.4)
+
+CozoDB Memory now includes **Temporal Graph Neural Network (TGNN) embeddings** that capture time-aware node representations combining historical context, temporal smoothness, and graph structure.
+
+### What are Temporal Embeddings?
+
+Traditional embeddings are static snapshots. Temporal embeddings evolve over time, capturing:
+
+1. **Historical Context** - Weighted aggregation of past observations with exponential decay
+2. **Temporal Smoothness** - Recency-weighted signals ensure gradual changes, not sudden jumps
+3. **Time Encoding** - Time2Vec-inspired sinusoidal encoding captures periodicity and time differences
+4. **Neighborhood Aggregation** - Related entities influence the embedding through weighted graph signals
+
+### Architecture
+
+```
+Entity Embedding = Fuse(
+  content_embedding (0.4),      # Semantic meaning
+  temporal_encoding (0.2),      # Time information (Time2Vec)
+  historical_context (0.2),     # Past observations (exponential decay)
+  neighborhood_agg (0.2)        # Related entities (graph signals)
+)
+```
+
+### Key Features
+
+- **Time2Vec Encoding** - Sinusoidal functions capture temporal patterns without discretization
+- **Exponential Decay Weighting** - Recent observations matter more (30-day half-life)
+- **Multi-Signal Fusion** - Combines content, temporal, historical, and graph signals
+- **Confidence Scoring** - Reflects data freshness and completeness (0-1 scale)
+- **Memory Caching** - Efficient temporal state for multi-hop traversals
+- **Time-Travel Support** - Generate embeddings at any historical timepoint via CozoDB Validity
+
+### Usage Example
+
+```typescript
+import { TemporalEmbeddingService } from 'cozo-memory';
+
+const temporalService = new TemporalEmbeddingService(
+  embeddingService,
+  dbQuery
+);
+
+// Generate embedding at current time
+const embedding = await temporalService.generateTemporalEmbedding(
+  entityId,
+  new Date()
+);
+
+// Or at a historical timepoint
+const pastEmbedding = await temporalService.generateTemporalEmbedding(
+  entityId,
+  new Date('2026-02-01')
+);
+
+// Compare temporal trajectories
+const similarity = cosineSimilarity(
+  embedding.embedding,
+  pastEmbedding.embedding
+);
+```
+
+### Confidence Scoring
+
+Confidence reflects data quality and freshness:
+
+```
+Base: 0.5
++ Recent entity (< 7 days): +0.3
++ Many observations (> 5): +0.15
++ Well-connected (> 10 relations): +0.15
+= Max: 1.0
+```
+
+### Research Foundation
+
+Based on cutting-edge research (2023-2026):
+
+- **ACM Temporal Graph Learning Primer** (2025) - Comprehensive TGNN taxonomy
+- **TempGNN** (2023) - Temporal embeddings for dynamic session-based recommendations
+- **Time-Aware Graph Embedding** (2021) - Temporal smoothness and task-oriented approaches
+- **Allan-Poe** (2025) - All-in-One Graph-Based Hybrid Search with dynamic fusion
+
+### Testing
+
+```bash
+npx ts-node src/test-temporal-embeddings.ts
+```
+
 ## Start / Integration
 
 ### MCP Server (stdio)
@@ -590,7 +683,7 @@ The interface is reduced to **4 consolidated tools**. The concrete operation is 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation |
-| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search (Multi-Level Context support) |
+| `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search, dynamic_fusion (Multi-Level Context support) |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, bridge_discovery, semantic_walk, infer_relations |
 | `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compact |
 
@@ -703,6 +796,7 @@ Actions:
 - `graph_rag`: `{ query, max_depth?, limit?, filters?, rerank? }` Graph-based reasoning. Finds vector seeds (with inline filtering) first and then expands transitive relationships. Uses recursive Datalog for efficient BFS expansion.
 - `graph_walking`: `{ query, start_entity_id?, max_depth?, limit? }` (v1.7) Recursive semantic graph search. Starts at vector seeds or a specific entity and follows relationships to other semantically relevant entities. Ideal for deeper path exploration.
 - `agentic_search`: `{ query, limit?, rerank? }` **(New v2.0)**: **Auto-Routing Search**. Uses a local LLM (Ollama) to analyze query intent and automatically routes it to the most appropriate strategy (`vector_search`, `graph_walk`, or `community_summary`).
+- `dynamic_fusion`: `{ query, config?, limit? }` **(New v2.3)**: **Dynamic Fusion Framework**. Combines 4 retrieval paths (Dense Vector, Sparse Vector, FTS, Graph) with configurable weights and fusion strategies. Inspired by Allan-Poe (arXiv:2511.00855).
 - `get_relation_evolution`: `{ from_id, to_id?, since?, until? }` (in `analyze_graph`) Shows temporal development of relationships including time range filter and diff summary.
 
 Important Details:
@@ -741,6 +835,81 @@ Examples:
 ```json
 { "action": "context", "query": "What is Alice working on right now?", "context_window": 20 }
 ```
+
+#### Dynamic Fusion Framework (v2.3)
+
+The Dynamic Fusion Framework combines 4 retrieval paths with configurable weights and fusion strategies:
+
+**Retrieval Paths:**
+1. **Dense Vector Search (HNSW)**: Semantic similarity via embeddings
+2. **Sparse Vector Search**: Keyword-based matching with TF-IDF scoring
+3. **Full-Text Search (FTS)**: BM25 scoring on entity names
+4. **Graph Traversal**: Multi-hop relationship expansion from vector seeds
+
+**Fusion Strategies:**
+- `rrf` (Reciprocal Rank Fusion): Combines rankings with position-based scoring
+- `weighted_sum`: Direct weighted combination of scores
+- `max`: Takes maximum score across all paths
+- `adaptive`: Query-dependent weighting (future enhancement)
+
+**Configuration Example:**
+
+```json
+{
+  "action": "dynamic_fusion",
+  "query": "database with graph capabilities",
+  "limit": 10,
+  "config": {
+    "vector": {
+      "enabled": true,
+      "weight": 0.4,
+      "topK": 20,
+      "efSearch": 100
+    },
+    "sparse": {
+      "enabled": true,
+      "weight": 0.3,
+      "topK": 20,
+      "minScore": 0.1
+    },
+    "fts": {
+      "enabled": true,
+      "weight": 0.2,
+      "topK": 20,
+      "fuzzy": true
+    },
+    "graph": {
+      "enabled": true,
+      "weight": 0.1,
+      "maxDepth": 2,
+      "maxResults": 20,
+      "relationTypes": ["related_to", "uses"]
+    },
+    "fusion": {
+      "strategy": "rrf",
+      "rrfK": 60,
+      "minScore": 0.0,
+      "deduplication": true
+    }
+  }
+}
+```
+
+**Response includes:**
+- `results`: Fused and ranked results with path contribution details
+- `stats`: Performance metrics including:
+  - `totalResults`: Number of results after fusion
+  - `pathContributions`: Count of results from each path
+  - `fusionTime`: Total execution time
+  - `pathTimes`: Individual execution times per path
+
+**Use Cases:**
+- **Broad Exploration**: Enable all paths with balanced weights
+- **Precision Search**: High vector weight, low graph weight
+- **Relationship Discovery**: High graph weight with specific relation types
+- **Keyword Matching**: High sparse/FTS weights for exact term matching
+
+```json
 
 #### Conflict Detection (Status)
 
