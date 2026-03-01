@@ -1,0 +1,21 @@
+{
+  "name": "@cozo-memory/llamaindex-examples",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "basic-rag": "tsx basic-rag.ts",
+    "graph-rag": "tsx graph-rag.ts",
+    "persistent-index": "tsx persistent-index.ts"
+  },
+  "dependencies": {
+    "@cozo-memory/adapters-core": "workspace:*",
+    "@cozo-memory/llamaindex": "workspace:*",
+    "llamaindex": "^0.7.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

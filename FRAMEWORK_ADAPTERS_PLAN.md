@@ -263,13 +263,6 @@ Each adapter needs converters between framework types and cozo-memory types:
 
 ---
 
-## Marketing & Community
-
-### Launch Strategy
-1. **Blog Posts:** "Cozo Memory + LangChain: Persistent Memory for AI Agents"
-2. **Video Tutorials:** YouTube walkthroughs for each adapter
-3. **Framework Communities:** Posts in LangChain/LlamaIndex/CrewAI Discord/Forums
-4. **Comparison Guides:** "Why Cozo Memory vs [Pinecone/Chroma/Weaviate]"
 
 ### Differentiation Points
 - **Local-First:** No cloud dependencies
