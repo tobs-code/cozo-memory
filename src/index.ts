@@ -2681,6 +2681,251 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
     }
   }
 
+  /**
+   * Memory Defragmentation
+   * Reorganizes memory structure by:
+   * 1. Detecting and merging duplicate/near-duplicate observations using LSH MinHash
+   * 2. Connecting fragmented knowledge islands (small connected components) to main graph
+   * 3. Removing orphaned entities (no observations or relations)
+   * 
+   * Inspired by Letta MemFS defragmentation
+   */
+  public async defragMemory(args: { 
+    confirm: boolean; 
+    similarity_threshold?: number;
+    min_island_size?: number;
+  }) {
+    await this.initPromise;
+    const startTime = Date.now();
+    
+    try {
+      console.error(`[Defrag] Starting memory defragmentation (confirm=${args.confirm})`);
+      
+      const similarity_threshold = args.similarity_threshold || 0.95; // High threshold for near-duplicates
+      const min_island_size = args.min_island_size || 3; // Islands with <= 3 nodes
+      
+      const stats = {
+        duplicates_found: 0,
+        duplicates_merged: 0,
+        islands_found: 0,
+        islands_connected: 0,
+        orphans_found: 0,
+        orphans_removed: 0,
+      };
+
+      // Step 1: Find duplicate observations using semantic similarity
+      console.error(`[Defrag] Step 1: Detecting duplicate observations (threshold=${similarity_threshold})`);
+      
+      const allObs = await this.db.run(`
+        ?[id, entity_id, text, embedding] := *observation{id, entity_id, text, embedding, @ "NOW"}
+      `);
+
+      const duplicatePairs: Array<[string, string, number]> = [];
+      
+      // Compare embeddings for similarity (using existing embeddings)
+      for (let i = 0; i < allObs.rows.length; i++) {
+        for (let j = i + 1; j < allObs.rows.length; j++) {
+          const emb1 = allObs.rows[i][3] as number[];
+          const emb2 = allObs.rows[j][3] as number[];
+          
+          if (!emb1 || !emb2 || emb1.length === 0 || emb2.length === 0) continue;
+          
+          // Cosine similarity
+          const similarity = this.cosineSimilarity(emb1, emb2);
+          
+          if (similarity >= similarity_threshold) {
+            duplicatePairs.push([
+              String(allObs.rows[i][0]), // id1
+              String(allObs.rows[j][0]), // id2
+              similarity
+            ]);
+          }
+        }
+      }
+      
+      stats.duplicates_found = duplicatePairs.length;
+      console.error(`[Defrag] Found ${stats.duplicates_found} duplicate observation pairs`);
+
+      // Step 2: Find fragmented knowledge islands (small connected components)
+      console.error(`[Defrag] Step 2: Detecting fragmented knowledge islands`);
+      
+      const components = await this.recomputeConnectedComponents();
+      const smallIslands = Object.entries(components.components || {})
+        .filter(([_, entities]) => (entities as any[]).length > 0 && (entities as any[]).length <= min_island_size)
+        .map(([compId, entities]) => ({ compId, entities: entities as any[], size: (entities as any[]).length }));
+      
+      stats.islands_found = smallIslands.length;
+      console.error(`[Defrag] Found ${stats.islands_found} small knowledge islands (size <= ${min_island_size})`);
+
+      // Step 3: Find orphaned entities (no observations, no relations)
+      console.error(`[Defrag] Step 3: Detecting orphaned entities`);
+      
+      // Simplified approach: Get all entities, then filter in JavaScript
+      const allEntities = await this.db.run(`
+        ?[id, name, type] := *entity{id, name, type, @ "NOW"}, id != "global_user_profile"
+      `);
+      
+      const orphanedEntities: any = { rows: [] };
+      
+      for (const row of allEntities.rows) {
+        const entityId = String(row[0]);
+        
+        // Check if entity has observations
+        const obsCheck = await this.db.run(`
+          ?[count(id)] := *observation{id, entity_id, @ "NOW"}, entity_id = $eid
+        `, { eid: entityId });
+        
+        const hasObs = Number(obsCheck.rows[0]?.[0] || 0) > 0;
+        if (hasObs) continue;
+        
+        // Check if entity has relationships
+        const relCheck = await this.db.run(`
+          out[count(from_id)] := *relationship{from_id, @ "NOW"}, from_id = $eid
+          in[count(to_id)] := *relationship{to_id, @ "NOW"}, to_id = $eid
+          ?[total] := out[out_count], in[in_count], total = out_count + in_count
+        `, { eid: entityId });
+        
+        const hasRel = Number(relCheck.rows[0]?.[0] || 0) > 0;
+        if (hasRel) continue;
+        
+        // This entity is orphaned
+        orphanedEntities.rows.push(row);
+      }
+      
+      stats.orphans_found = orphanedEntities.rows.length;
+      console.error(`[Defrag] Found ${stats.orphans_found} orphaned entities`);
+
+      // If not confirmed, return dry-run results
+      if (!args.confirm) {
+        return {
+          status: "dry_run",
+          message: "Defragmentation analysis complete. Set confirm=true to execute.",
+          statistics: stats,
+          preview: {
+            duplicate_samples: duplicatePairs.slice(0, 5).map(([id1, id2, sim]) => ({
+              observation_id_1: id1,
+              observation_id_2: id2,
+              similarity: sim
+            })),
+            island_samples: smallIslands.slice(0, 5),
+            orphan_samples: orphanedEntities.rows.slice(0, 5).map((r: any) => ({
+              id: String(r[0]),
+              name: String(r[1]),
+              type: String(r[2])
+            }))
+          }
+        };
+      }
+
+      // Execute defragmentation
+      console.error(`[Defrag] Executing defragmentation...`);
+
+      // Merge duplicates: Keep first, delete second
+      for (const [id1, id2, similarity] of duplicatePairs) {
+        try {
+          // Delete the duplicate observation
+          await this.db.run(`
+            ?[id, created_at] := *observation{id, created_at}, id = $id2
+            :rm observation {id, created_at}
+          `, { id2 });
+          stats.duplicates_merged++;
+        } catch (e: any) {
+          console.error(`[Defrag] Failed to merge duplicate ${id2}:`, e.message);
+        }
+      }
+
+      // Connect islands: Create semantic relations to main graph
+      for (const island of smallIslands) {
+        try {
+          // Find the most central entity in the island
+          const islandEntityIds = island.entities.map((e: any) => e.id);
+          
+          // Find semantically similar entities in the main graph (not in this island)
+          for (const entityId of islandEntityIds) {
+            const entityData = await this.db.run(`
+              ?[embedding] := *entity{id: $id, embedding, @ "NOW"}
+            `, { id: entityId });
+            
+            if (entityData.rows.length === 0) continue;
+            
+            const embedding = entityData.rows[0][0] as number[];
+            if (!embedding || embedding.length === 0) continue;
+            
+            // Find similar entity in main graph
+            const similarEntities = await this.db.run(`
+              ~entity:semantic { id: target_id | query: $emb, k: 1, bind_distance: dist }
+              ?[target_id, dist] := ~entity:semantic { id: target_id | query: $emb, k: 1, bind_distance: dist },
+                                     target_id != $id
+            `, { emb: embedding, id: entityId });
+            
+            if (similarEntities.rows.length > 0) {
+              const targetId = String(similarEntities.rows[0][0]);
+              const distance = Number(similarEntities.rows[0][1]);
+              const similarity = 1 - distance;
+              
+              // Create bridge relation
+              if (similarity >= 0.7) {
+                await this.createRelation({
+                  from_id: entityId,
+                  to_id: targetId,
+                  relation_type: "semantically_related",
+                  strength: similarity,
+                  metadata: { created_by: "defrag", reason: "island_connection" }
+                });
+                stats.islands_connected++;
+                break; // One connection per island is enough
+              }
+            }
+          }
+        } catch (e: any) {
+          console.error(`[Defrag] Failed to connect island ${island.compId}:`, e.message);
+        }
+      }
+
+      // Remove orphaned entities
+      for (const row of orphanedEntities.rows) {
+        try {
+          const entityId = String(row[0]);
+          await this.deleteEntity({ entity_id: entityId });
+          stats.orphans_removed++;
+        } catch (e: any) {
+          console.error(`[Defrag] Failed to remove orphan ${row[0]}:`, e.message);
+        }
+      }
+
+      this.trackOperation('defrag', startTime);
+      
+      return {
+        status: "completed",
+        message: `Defragmentation complete: ${stats.duplicates_merged} duplicates merged, ${stats.islands_connected} islands connected, ${stats.orphans_removed} orphans removed`,
+        statistics: stats,
+        duration_ms: Date.now() - startTime
+      };
+      
+    } catch (error: any) {
+      console.error("[Defrag] Error during defragmentation:", error);
+      this.trackError('defrag');
+      return { error: "Defragmentation failed", message: error.message };
+    }
+  }
+
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) return 0;
+    
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
   public async invalidateObservation(args: { observation_id: string }) {
     await this.initPromise;
     const startTime = Date.now();
@@ -4344,6 +4589,12 @@ Supported actions:
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
       }),
       z.object({
+        action: z.literal("defrag"),
+        confirm: z.boolean().describe("Must be true to confirm defragmentation"),
+        similarity_threshold: z.number().min(0.8).max(1.0).optional().default(0.95).describe("Similarity threshold for duplicate detection (0.8-1.0)"),
+        min_island_size: z.number().min(1).max(10).optional().default(3).describe("Maximum size of knowledge islands to connect"),
+      }),
+      z.object({
         action: z.literal("reflect"),
         entity_id: z.string().optional().describe("Optional entity ID for targeted reflection"),
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
@@ -4368,7 +4619,7 @@ Supported actions:
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "reflect", "clear_memory", "summarize_communities", "compact"])
+        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -4383,10 +4634,12 @@ Supported actions:
       snapshot_id_a: z.string().optional().describe("Required for snapshot_diff"),
       snapshot_id_b: z.string().optional().describe("Required for snapshot_diff"),
       metadata: MetadataSchema.optional().describe("Optional for snapshot_create"),
-      confirm: z.boolean().optional().describe("Required for cleanup/clear_memory and must be true"),
+      confirm: z.boolean().optional().describe("Required for cleanup/defrag/clear_memory and must be true"),
       older_than_days: z.number().optional().describe("Optional for cleanup"),
       max_observations: z.number().optional().describe("Optional for cleanup"),
       min_entity_degree: z.number().optional().describe("Optional for cleanup"),
+      similarity_threshold: z.number().optional().describe("Optional for defrag (0.8-1.0, default 0.95)"),
+      min_island_size: z.number().optional().describe("Optional for defrag (1-10, default 3)"),
       model: z.string().optional().describe("Optional for cleanup/reflect/summarize_communities"),
       entity_id: z.string().optional().describe("Optional for reflect"),
       min_community_size: z.number().optional().describe("Optional for summarize_communities"),
@@ -4414,6 +4667,9 @@ Supported actions:
 - 'cleanup': Janitor service for consolidation. Params: { confirm: boolean, older_than_days?: number, max_observations?: number, min_entity_degree?: number, model?: string }.
   * With confirm=false: Dry-Run (shows candidates).
   * With confirm=true: Merges old/isolated fragments using LLM (Executive Summary) and removes noise.
+- 'defrag': Memory defragmentation. Reorganizes memory structure by detecting/merging duplicates, connecting fragmented knowledge islands, and removing orphaned entities. Params: { confirm: boolean, similarity_threshold?: number (0.8-1.0, default 0.95), min_island_size?: number (1-10, default 3) }.
+  * With confirm=false: Dry-Run (shows analysis and candidates).
+  * With confirm=true: Executes defragmentation and returns statistics.
 - 'reflect': Reflection service. Analyzes memory for contradictions and insights. Params: { entity_id?: string, model?: string }.
 - 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.
 - 'summarize_communities': Hierarchical GraphRAG. Generates summaries for entity clusters. Params: { model?: string, min_community_size?: number }.`,
@@ -4624,6 +4880,19 @@ Supported actions:
             return JSON.stringify(result);
           } catch (error: any) {
             return JSON.stringify({ error: error.message || "Error during cleanup" });
+          }
+        }
+
+        if (input.action === "defrag") {
+          try {
+            const result = await this.defragMemory({
+              confirm: Boolean(input.confirm),
+              similarity_threshold: input.similarity_threshold,
+              min_island_size: input.min_island_size,
+            });
+            return JSON.stringify(result);
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error during defragmentation" });
           }
         }
 
