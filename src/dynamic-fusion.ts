@@ -12,8 +12,9 @@
  * Key Innovation: Dynamic fusion without index reconstruction
  */
 
-import { EmbeddingService } from './embedding-service.js';
-import { HybridSearch } from './hybrid-search.js';
+import { EmbeddingService } from './embedding-service';
+import { HybridSearch } from './hybrid-search';
+import { AdaptiveQueryFusion, SearchWeights } from './adaptive-query-fusion';
 import { CozoDb } from 'cozo-node';
 
 export interface FusionConfig {
@@ -73,6 +74,16 @@ export interface FusionResult {
     sparse?: number;
     fts?: number;
     graph?: number;
+  };
+  // Enhanced explanation fields
+  detailedExplanation?: {
+    summary: string;
+    reasoning: string;
+    scoreBreakdown?: {
+      components: Record<string, number>;
+      formula: string;
+    };
+    pathVisualization?: string;
   };
 }
 
@@ -138,6 +149,7 @@ export const DEFAULT_FUSION_CONFIG: FusionConfig = {
 export class DynamicFusionSearch {
   private db: CozoDb;
   private embeddings: EmbeddingService;
+  private adaptiveQueryFusion: AdaptiveQueryFusion;
 
   constructor(
     db: CozoDb,
@@ -145,10 +157,15 @@ export class DynamicFusionSearch {
   ) {
     this.db = db;
     this.embeddings = embeddings;
+    this.adaptiveQueryFusion = new AdaptiveQueryFusion(db, embeddings, {
+      enableLLM: true,
+      cacheClassifications: true,
+      maxCacheSize: 1000
+    });
   }
 
   /**
-   * Execute dynamic fusion search
+   * Execute dynamic fusion search with adaptive weights
    */
   async search(
     query: string,
@@ -156,11 +173,21 @@ export class DynamicFusionSearch {
   ): Promise<{ results: FusionResult[]; stats: FusionStats }> {
     const startTime = Date.now();
     
-    // Merge with defaults
+    // Get adaptive weights based on query classification
+    const adaptiveWeights = await this.adaptiveQueryFusion.getAdaptiveWeights(query);
+    
+    // Merge config with defaults first, then apply adaptive weights
     const fullConfig = this.mergeConfig(config);
     
-    console.log('[DynamicFusion] Starting search with config:', {
+    // Override weights with adaptive values
+    fullConfig.vector!.weight = adaptiveWeights.vector;
+    fullConfig.sparse!.weight = adaptiveWeights.sparse;
+    fullConfig.fts!.weight = adaptiveWeights.fts;
+    fullConfig.graph!.weight = adaptiveWeights.graph;
+    
+    console.log('[DynamicFusion] Starting search with adaptive weights:', {
       query,
+      weights: adaptiveWeights,
       enabledPaths: this.getEnabledPaths(fullConfig)
     });
 
@@ -176,7 +203,8 @@ export class DynamicFusionSearch {
     console.log('[DynamicFusion] Search completed:', {
       totalResults: fusedResults.length,
       pathContributions: stats.pathContributions,
-      fusionTime: stats.fusionTime
+      fusionTime: stats.fusionTime,
+      adaptiveWeights
     });
 
     return { results: fusedResults, stats };
@@ -817,10 +845,31 @@ export class DynamicFusionSearch {
    */
   private mergeConfig(config: Partial<FusionConfig>): FusionConfig {
     return {
-      vector: { ...DEFAULT_FUSION_CONFIG.vector!, ...config.vector } as NonNullable<FusionConfig['vector']>,
-      sparse: { ...DEFAULT_FUSION_CONFIG.sparse!, ...config.sparse } as NonNullable<FusionConfig['sparse']>,
-      fts: { ...DEFAULT_FUSION_CONFIG.fts!, ...config.fts } as NonNullable<FusionConfig['fts']>,
-      graph: { ...DEFAULT_FUSION_CONFIG.graph!, ...config.graph } as NonNullable<FusionConfig['graph']>,
+      vector: { 
+        enabled: config.vector?.enabled ?? DEFAULT_FUSION_CONFIG.vector!.enabled,
+        weight: config.vector?.weight ?? DEFAULT_FUSION_CONFIG.vector!.weight,
+        topK: config.vector?.topK ?? DEFAULT_FUSION_CONFIG.vector!.topK,
+        efSearch: config.vector?.efSearch ?? DEFAULT_FUSION_CONFIG.vector!.efSearch
+      },
+      sparse: { 
+        enabled: config.sparse?.enabled ?? DEFAULT_FUSION_CONFIG.sparse!.enabled,
+        weight: config.sparse?.weight ?? DEFAULT_FUSION_CONFIG.sparse!.weight,
+        topK: config.sparse?.topK ?? DEFAULT_FUSION_CONFIG.sparse!.topK,
+        minScore: config.sparse?.minScore ?? DEFAULT_FUSION_CONFIG.sparse!.minScore
+      },
+      fts: { 
+        enabled: config.fts?.enabled ?? DEFAULT_FUSION_CONFIG.fts!.enabled,
+        weight: config.fts?.weight ?? DEFAULT_FUSION_CONFIG.fts!.weight,
+        topK: config.fts?.topK ?? DEFAULT_FUSION_CONFIG.fts!.topK,
+        fuzzy: config.fts?.fuzzy ?? DEFAULT_FUSION_CONFIG.fts!.fuzzy
+      },
+      graph: { 
+        enabled: config.graph?.enabled ?? DEFAULT_FUSION_CONFIG.graph!.enabled,
+        weight: config.graph?.weight ?? DEFAULT_FUSION_CONFIG.graph!.weight,
+        maxDepth: config.graph?.maxDepth ?? DEFAULT_FUSION_CONFIG.graph!.maxDepth,
+        maxResults: config.graph?.maxResults ?? DEFAULT_FUSION_CONFIG.graph!.maxResults,
+        relationTypes: config.graph?.relationTypes ?? DEFAULT_FUSION_CONFIG.graph!.relationTypes
+      },
       fusion: { ...DEFAULT_FUSION_CONFIG.fusion!, ...config.fusion } as NonNullable<FusionConfig['fusion']>
     };
   }
@@ -835,5 +884,26 @@ export class DynamicFusionSearch {
     if (config.fts?.enabled) paths.push('fts');
     if (config.graph?.enabled) paths.push('graph');
     return paths;
+  }
+
+  /**
+   * Get query classification details (for debugging/transparency)
+   */
+  async getQueryClassification(query: string) {
+    return this.adaptiveQueryFusion.getClassificationDetails(query);
+  }
+
+  /**
+   * Clear classification cache
+   */
+  clearClassificationCache() {
+    this.adaptiveQueryFusion.clearCache();
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getClassificationCacheStats() {
+    return this.adaptiveQueryFusion.getCacheStats();
   }
 }

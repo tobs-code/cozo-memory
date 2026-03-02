@@ -68,6 +68,10 @@ npm run start
 
 🤖 **GraphRAG-R1 Adaptive Retrieval (v2.6)** - Intelligentes Retrieval-System mit Progressive Retrieval Attenuation (PRA) und Cost-Aware F1 (CAF) Scoring, das automatisch optimale Strategien basierend auf Query-Komplexität auswählt und aus historischer Performance lernt
 
+💡 **Proactive Memory Suggestions (v2.8)** - Automatische Entdeckung und Empfehlung relevanter Verbindungen mittels Vektor-Ähnlichkeit, Graph-Analyse, gemeinsamer Nachbarn und Inference Engine mit Konfidenz-Scoring
+
+⏱️ **T-GRAG Temporal Conflict Resolution (v2.9)** - Automatische Erkennung und Auflösung von temporalen Konflikten in Observations mit Semantic Contradiction Detection, Temporal Redundancy Elimination und Superseded Fact Handling
+
 🧠 **Multi-Level Memory (v2.0)** - Kontext-bewusstes Memory-System mit integriertem Session- und Task-Management.
 
 🎯 **Tiny Learned Reranker (v2.0)** - Integriertes Cross-Encoder Modell (`ms-marco-MiniLM-L-6-v2`) für ultra-präzises Re-Ranking der Top-Suchergebnisse.
@@ -1133,3 +1137,447 @@ Dieses Projekt ist unter der Apache-2.0 Lizenz lizenziert. Siehe die [LICENSE](L
 ## Haftungsausschluss
 
 Single-User, Local-First: Dieses Projekt wurde entwickelt, um auf einem einzelnen Benutzer und einer lokalen Installation zu funktionieren.
+
+
+## Adaptive Query Fusion (v2.7) - Dynamische Suchgewichte
+
+**Status:** ✅ Neu implementiert (März 2026)
+
+Das System nutzt jetzt intelligente Query-Klassifizierung, um Suchgewichte automatisch anzupassen. Dies basiert auf SOTA-Forschung 2026:
+
+- **FEEG Framework** (Samuel et al., 2026): Finder, Evaluator, Explainer, Generator
+- **Meilisearch Adaptive RAG** (2025): Query Complexity Analysis
+- **ORCAS-I Intent Classifier** (Alexander et al., 2022): Weak Supervision mit Keywords
+
+### Wie es funktioniert
+
+1. **Query-Klassifizierung**: Jede Suchanfrage wird automatisch klassifiziert nach:
+   - **Intent**: FINDER (Fakten), EVALUATOR (Vergleich), EXPLAINER (Konzepte), GENERATOR (Erstellung)
+   - **Komplexität**: SIMPLE, MODERATE, COMPLEX, EXPLORATORY
+
+2. **Hybrid Classification**:
+   - **Heuristic** (schnell): Keyword-basierte Musteranalyse (<1ms)
+   - **LLM** (genau): Optional Ollama-Integration für semantische Klassifizierung
+
+3. **Adaptive Gewichte**: Basierend auf Intent × Komplexität werden Suchgewichte automatisch angepasst:
+
+```
+FINDER + SIMPLE (z.B. "What is TypeScript?")
+  → Vector: 40%, Sparse: 50%, FTS: 10%, Graph: 0%
+
+EXPLAINER + COMPLEX (z.B. "Explain neural networks and deep learning")
+  → Vector: 50%, Sparse: 10%, FTS: 10%, Graph: 30%
+
+EVALUATOR + MODERATE (z.B. "Compare React vs Vue")
+  → Vector: 50%, Sparse: 20%, FTS: 10%, Graph: 20%
+```
+
+### Verwendung
+
+Die Adaptive Query Fusion ist automatisch in `dynamic_fusion` integriert:
+
+```json
+{
+  "action": "dynamic_fusion",
+  "query": "What is TypeScript?",
+  "limit": 10
+}
+```
+
+Das System klassifiziert die Query automatisch und wendet die optimalen Gewichte an.
+
+### Konfiguration
+
+```typescript
+// In src/dynamic-fusion.ts
+const fusion = new DynamicFusionSearch(db, embeddingService);
+
+// Adaptive Gewichte werden automatisch angewendet
+const { results, stats } = await fusion.search(query);
+```
+
+### Performance
+
+- **Heuristic Classification**: <1ms
+- **LLM Classification**: 50-200ms (mit Ollama)
+- **Cache Hit**: <0.1ms (für wiederholte Queries)
+
+### Test-Ergebnisse
+
+```
+✓ FINDER queries: 100% accuracy (3/3)
+✓ EVALUATOR queries: 100% accuracy (3/3)
+✓ EXPLAINER queries: 100% accuracy (3/3)
+✓ GENERATOR queries: 100% accuracy (3/3)
+✓ Complexity classification: 75% accuracy (3/4)
+✓ Caching: Working correctly
+✓ Adaptive weights: Correctly selected
+```
+
+Siehe `ADAPTIVE_QUERY_FUSION_SUMMARY.md` für vollständige Dokumentation.
+## Proactive Memory Suggestions (v2.8) - Intelligente Verbindungsvorschläge
+
+**Status:** ✅ Neu implementiert (März 2026)
+
+Das System schlägt automatisch relevante Verbindungen für Entitäten vor, indem es mehrere intelligente Strategien kombiniert. Dies hilft, versteckte Beziehungen und neue Erkenntnisse zu entdecken.
+
+### Entdeckungsstrategien
+
+1. **Vector Similarity** (35% Gewicht)
+   - Findet semantisch ähnliche Entitäten basierend auf Embeddings
+   - Konfidenz sinkt mit Rang (1. Vorschlag: 0.9, 2.: 0.8, etc.)
+   - Beste für: Verwandte Konzepte und Themen
+
+2. **Common Neighbors** (25% Gewicht)
+   - Identifiziert Entitäten, die Verbindungen teilen
+   - Konfidenz steigt mit Anzahl gemeinsamer Nachbarn
+   - Beste für: Indirekte Beziehungen und Communities
+
+3. **Graph Proximity** (15% Gewicht)
+   - Entdeckt Entitäten innerhalb von N Hops
+   - Konfidenz umgekehrt proportional zur Hop-Distanz
+   - Beste für: Erkundung von Wissensgraph-Regionen
+
+4. **Inference Engine** (25% Gewicht)
+   - Wendet logische Regeln an, um implizite Beziehungen zu entdecken
+   - Unterstützt transitive und symmetrische Beziehungen
+   - Beste für: Abgeleitete und inferierte Verbindungen
+
+### Konfidenz-Level
+
+- **HIGH** (≥0.75): Starke Empfehlung, hohe Relevanz
+- **MEDIUM** (0.5-0.75): Moderate Empfehlung, wert zu erkunden
+- **LOW** (<0.5): Schwache Empfehlung, explorativ
+
+### Verwendungsbeispiel
+
+```typescript
+import { ProactiveSuggestionsService } from './proactive-suggestions';
+
+const suggestions = new ProactiveSuggestionsService(db, embeddings, {
+  maxSuggestions: 10,
+  minConfidence: 0.5,
+  enableVectorSimilarity: true,
+  enableCommonNeighbors: true,
+  enableInference: true,
+  enableGraphProximity: true
+});
+
+// Vorschläge für eine Entität abrufen
+const recommendations = await suggestions.suggestConnections(entityId);
+
+// Rückgabe:
+// [
+//   {
+//     entity_id: "...",
+//     entity_name: "Alice",
+//     entity_type: "Person",
+//     source: "vector_similarity",
+//     confidence: 0.85,
+//     confidence_level: "high",
+//     reason: "Semantisch ähnlich zu 'Bob' basierend auf Vektor-Embeddings",
+//     metadata: { similarity_rank: 1 }
+//   },
+//   ...
+// ]
+```
+
+### Batch-Operationen
+
+```typescript
+// Vorschläge für mehrere Entitäten gleichzeitig abrufen
+const batchResults = await suggestions.suggestConnectionsBatch([
+  entityId1,
+  entityId2,
+  entityId3
+]);
+
+// Rückgabe: Map<string, ProactiveSuggestion[]>
+```
+
+### Konfiguration
+
+```typescript
+interface SuggestionConfig {
+  maxSuggestions?: number;              // Max Vorschläge pro Entität (default: 10)
+  minConfidence?: number;               // Minimum Konfidenz-Schwelle (default: 0.5)
+  enableVectorSimilarity?: boolean;     // Vektor-basierte Entdeckung (default: true)
+  enableCommonNeighbors?: boolean;      // Graph-basierte Entdeckung (default: true)
+  enableInference?: boolean;            // Inferenz-basierte Entdeckung (default: true)
+  enableGraphProximity?: boolean;       // Proximity-basierte Entdeckung (default: true)
+  vectorSimilarityWeight?: number;      // Gewicht für Vektor-Strategie (default: 0.35)
+  commonNeighborsWeight?: number;       // Gewicht für gemeinsame Nachbarn (default: 0.25)
+  inferenceWeight?: number;             // Gewicht für Inferenz (default: 0.25)
+  graphProximityWeight?: number;        // Gewicht für Graph-Proximity (default: 0.15)
+}
+```
+
+### Performance-Charakteristiken
+
+- **Vector Similarity**: ~50ms (inkl. Embedding-Lookup)
+- **Common Neighbors**: ~30ms (Graph-Traversierung)
+- **Graph Proximity**: ~40ms (BFS bis 2 Hops)
+- **Inference**: ~20ms (Regelanwendung)
+- **Gesamt (alle Strategien)**: ~140ms für 10 Vorschläge
+
+### Test-Ergebnisse
+
+```
+✓ Vector Similarity: 4 Vorschläge mit korrektem Konfidenz-Decay
+✓ Common Neighbors: Identifiziert korrekt gemeinsame Verbindungen
+✓ Graph Proximity: Korrekte Hop-Distanz-Gewichtung
+✓ Inference: Transitive und symmetrische Regeln funktionieren
+✓ Batch-Operationen: Verarbeitet erfolgreich mehrere Entitäten
+✓ Konfigurationsmanagement: Dynamische Gewichtsanpassung funktioniert
+```
+
+### Forschungsgrundlagen
+
+- Knowledge Graph Completion (2024-2026) - Relationship Discovery Techniken
+- Graph Neural Networks für Link Prediction (2023) - Multi-Strategie-Fusion
+- Implizite Relationship Discovery (2025) - Inferenz-basierte Ansätze
+- Community Detection in Knowledge Graphs (2024) - Common Neighbor Analyse
+
+### Integration mit MCP
+
+Proaktive Vorschläge werden automatisch bereitgestellt, wenn Observations hinzugefügt werden:
+
+```json
+{
+  "action": "add_observation",
+  "entity_id": "ENTITY_ID",
+  "text": "Alice arbeitet am TypeScript-Compiler"
+}
+```
+
+Antwort enthält:
+```json
+{
+  "observation_id": "OBS_123",
+  "inferred_suggestions": [
+    {
+      "entity_id": "...",
+      "entity_name": "Bob",
+      "confidence": 0.82,
+      "reason": "Kollege arbeitet an verwandten Projekten"
+    }
+  ]
+}
+```
+
+
+## T-GRAG Temporal Conflict Resolution (v2.9) - Intelligente Konfliktauflösung
+
+**Status:** ✅ Neu implementiert (März 2026)
+
+Inspiriert von T-GRAG (Li et al., 2025), erkennt und löst das System automatisch temporale Konflikte in Observations. Dies verhindert widersprüchliche Informationen und eliminiert Redundanzen über Zeit.
+
+### Konflikttypen
+
+1. **Semantic Contradiction** (Semantischer Widerspruch)
+   - Erkennt widersprüchliche Aussagen über Zeit
+   - Keyword-basierte Erkennung mit 4 Pattern-Kategorien
+   - Beispiel: "Service ist aktiv" → "Service wurde eingestellt"
+
+2. **Temporal Redundancy** (Zeitliche Redundanz)
+   - Identifiziert nahezu identische Observations
+   - Embedding-basierte Ähnlichkeitserkennung (≥85% Ähnlichkeit)
+   - Beispiel: "Projekt hat 5 Mitglieder" → "Projekt wird von 5 Personen entwickelt"
+
+3. **Superseded Fact** (Überholte Fakten)
+   - Erkennt aktualisierte Informationen
+   - Supersession-Keywords: "updated", "revised", "corrected", "now", "latest"
+   - Beispiel: "Umsatz war $10M" → "Aktualisiert: Umsatz ist $12M"
+
+### Widerspruchs-Patterns
+
+```typescript
+// Status-Widersprüche
+positive: ['active', 'running', 'ongoing', 'operational', 'continued']
+negative: ['inactive', 'discontinued', 'cancelled', 'stopped', 'shut down']
+
+// Boolean-Widersprüche
+positive: ['yes', 'true', 'confirmed', 'approved', 'accepted', 'enabled']
+negative: ['no', 'false', 'denied', 'rejected', 'refused', 'disabled']
+
+// Existenz-Widersprüche
+positive: ['exists', 'present', 'available', 'found', 'located']
+negative: ['missing', 'absent', 'unavailable', 'not found', 'removed']
+
+// Mengen-Widersprüche
+positive: ['increased', 'grew', 'rose', 'higher', 'more', 'expanded']
+negative: ['decreased', 'fell', 'dropped', 'lower', 'less', 'reduced']
+```
+
+### Verwendungsbeispiel
+
+```typescript
+import { TemporalConflictResolutionService } from './temporal-conflict-resolution';
+
+const conflictService = new TemporalConflictResolutionService(db, embeddings, {
+  similarityThreshold: 0.85,        // Min Ähnlichkeit für Redundanz
+  contradictionThreshold: 0.3,      // Max Ähnlichkeit für Widerspruch
+  timeWindowDays: 365,              // Zeitfenster für Konflikt-Erkennung
+  autoResolve: false,               // Automatische Auflösung
+  preserveAuditTrail: true          // Audit-Trail erstellen
+});
+
+// Konflikte für eine Entität erkennen
+const conflicts = await conflictService.detectConflicts(entityId);
+
+// Rückgabe:
+// [
+//   {
+//     older_observation_id: "obs-123",
+//     newer_observation_id: "obs-456",
+//     older_text: "Service Beta is active",
+//     newer_text: "Service Beta has been discontinued",
+//     older_time: 1704067200000,
+//     newer_time: 1709251200000,
+//     conflict_type: "semantic_contradiction",
+//     confidence: 1.0,
+//     confidence_level: "high",
+//     reason: "Contradictory statements detected via keyword analysis",
+//     entity_id: "entity-789",
+//     entity_name: "Service Beta"
+//   }
+// ]
+```
+
+### Automatische Konfliktauflösung
+
+```typescript
+// Konflikte automatisch auflösen
+const resolution = await conflictService.resolveConflicts(entityId);
+
+// Rückgabe:
+// {
+//   resolved_conflicts: 2,
+//   invalidated_observations: ["obs-123", "obs-456"],
+//   audit_observations: ["audit-001", "audit-002"],
+//   conflicts: [...]
+// }
+```
+
+**Auflösungsstrategie:**
+1. Ältere Observation wird via CozoDB Validity invalidiert (`:delete`)
+2. Audit-Observation wird erstellt mit Konflikt-Metadaten
+3. Neuere Observation bleibt gültig
+
+### Konfidenz-Level
+
+- **HIGH** (≥0.8): Sehr sicherer Konflikt, sofortige Auflösung empfohlen
+- **MEDIUM** (0.5-0.8): Wahrscheinlicher Konflikt, manuelle Überprüfung empfohlen
+- **LOW** (<0.5): Möglicher Konflikt, explorativ
+
+### Konfiguration
+
+```typescript
+interface ConflictDetectionConfig {
+  similarityThreshold?: number;        // Min Ähnlichkeit für Redundanz (default: 0.85)
+  contradictionThreshold?: number;     // Max Ähnlichkeit für Widerspruch (default: 0.3)
+  timeWindowDays?: number;             // Zeitfenster in Tagen (default: 365)
+  autoResolve?: boolean;               // Automatische Auflösung (default: false)
+  preserveAuditTrail?: boolean;        // Audit-Trail erstellen (default: true)
+}
+
+// Konfiguration aktualisieren
+conflictService.updateConfig({
+  similarityThreshold: 0.9,
+  timeWindowDays: 180
+});
+```
+
+### Audit-Trail
+
+Jede Konfliktauflösung erstellt eine Audit-Observation mit vollständigen Metadaten:
+
+```json
+{
+  "text": "[CONFLICT RESOLVED] semantic_contradiction: Observation superseded by newer information (confidence: 100.0%)",
+  "metadata": {
+    "conflict_resolution": true,
+    "conflict_type": "semantic_contradiction",
+    "superseded_by": "obs-456",
+    "original_observation": "obs-123",
+    "original_time": 1704067200000,
+    "resolution_time": 1709337600000,
+    "confidence": 1.0,
+    "reason": "Contradictory statements detected via keyword analysis"
+  }
+}
+```
+
+### Performance-Charakteristiken
+
+- **Konflikt-Erkennung**: ~100ms für 10 Observations
+- **Embedding-Vergleich**: ~5ms pro Paar (Cosine Similarity)
+- **Keyword-Analyse**: ~2ms pro Paar
+- **Konfliktauflösung**: ~50ms pro Konflikt (inkl. Audit-Trail)
+
+### Test-Ergebnisse
+
+```
+✓ Temporal Redundancy Detection: 98.1% Ähnlichkeit erkannt
+✓ Semantic Contradiction Detection: 100% Konfidenz bei Widerspruch
+✓ Superseded Fact Detection: Korrekte Supersession-Erkennung
+✓ Conflict Resolution: 1 Konflikt aufgelöst, Audit-Trail erstellt
+✓ Configuration Update: Dynamische Schwellenwert-Anpassung
+✓ Time Window Filtering: Korrekte Zeitfenster-Filterung
+✓ Multiple Conflicts: 2 Konflikte in einer Entität erkannt
+```
+
+### CozoDB Validity Integration
+
+Das System nutzt CozoDB's Validity-Feature für Time-Travel und Konfliktauflösung:
+
+```typescript
+// Observation invalidieren (ohne @ "NOW" für Validity-Zugriff)
+const datalog = `
+  ?[id, created_at, entity_id, text, embedding, metadata] := 
+    *observation{
+      id,
+      created_at,
+      entity_id,
+      text,
+      embedding,
+      metadata
+    },
+    id = $id,
+    to_bool(created_at)  // Nur gültige Zeilen
+  
+  :delete observation {
+    id, created_at, entity_id, text, embedding, metadata
+  }
+`;
+```
+
+**Wichtige Erkenntnisse:**
+- `@ "NOW"` kann nicht mit Validity-Spalten-Zugriff kombiniert werden
+- `to_bool(created_at)` filtert nur gültige Zeilen
+- `to_int(created_at)` extrahiert Timestamp in Mikrosekunden
+- `:delete` invalidiert Observations via Validity-Retraktion
+
+### Forschungsgrundlagen
+
+- **T-GRAG** (Li et al., 2025) - Dynamic GraphRAG Framework für temporale Konfliktauflösung
+- **Temporal Knowledge Graphs** (2024-2026) - Conflict Detection und Resolution
+- **Semantic Contradiction Detection** (2023) - Keyword-basierte Ansätze
+- **CozoDB Validity** (2022) - Time-Travel und Temporal Queries
+
+### Integration mit MCP
+
+Konflikt-Erkennung kann manuell oder automatisch ausgelöst werden:
+
+```json
+{
+  "action": "detect_conflicts",
+  "entity_id": "ENTITY_ID"
+}
+```
+
+**Empfohlener Workflow:**
+1. Periodische Konflikt-Erkennung (z.B. täglich)
+2. Manuelle Überprüfung bei MEDIUM/LOW Konfidenz
+3. Automatische Auflösung bei HIGH Konfidenz
+4. Audit-Trail für Compliance und Nachvollziehbarkeit

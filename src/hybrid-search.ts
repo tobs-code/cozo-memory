@@ -17,6 +17,12 @@ export interface SearchResult {
   explanation?: {
     source_score: number;
     details: string;
+    reasoning?: string;
+    pathVisualization?: string;
+    scoreBreakdown?: {
+      components: Record<string, number>;
+      formula: string;
+    };
   } | string;
 }
 
