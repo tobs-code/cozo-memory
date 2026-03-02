@@ -5,6 +5,22 @@ All notable changes to CozoDB Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-03-03
+
+### Added
+- **SYNAPSE - Spreading Activation with Lateral Inhibition**: Cognitive dynamics-based retrieval where relevance emerges from activation propagation through the knowledge graph (based on arXiv 2601.02744, January 2026)
+- `SpreadingActivationService` implementing Collins & Loftus (1975) spreading activation model
+- Lateral Inhibition mechanism for attention focusing - top-M nodes suppress weaker competitors
+- Fan Effect (ACT-R, Anderson 1983) - attention dilution from high-degree nodes
+- Temporal Decay - recent connections weighted higher than old ones
+- Sigmoid Activation Function for non-linear activation dynamics
+- Dual Trigger seed node selection combining BM25 (lexical) and semantic similarity
+- `spreadActivation()` - propagates activation through graph with configurable steps
+- `tripleHybridRetrieval()` - combines Semantic (50%) + Activation (30%) + PageRank (20%) signals
+- Configurable parameters: spreading factor, decay factor, temporal decay, inhibition strength, propagation steps
+- Convergence detection for efficient real-time retrieval
+- Comprehensive test suite with 7 validation scenarios including multi-hop reasoning, temporal effects, and convergence analysis
+
 ## [2.13.0] - 2026-03-03
 
 ### Added
