@@ -26,6 +26,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Inference rule documentation with examples
   - Memory hierarchy and time-travel query guides
   - Manual inclusion via `#cozo-memory-guide` in Kiro
+- **Improved Inference Rule Documentation**:
+  - "Important: All Variables Must Be Bound" section
+  - Common mistakes with ❌/✅ examples
+  - Three additional Datalog examples (same type entities, co-occurrence, correct binding)
+  - Clear explanation of variable binding requirements
+- **Parameter Naming Guide**: Comprehensive guide for API parameter consistency
+  - When to use `entity_id` vs `id` vs `observation_id`
+  - Practical examples for each parameter type
+  - Clarification for `stop_session` and `stop_task` using `id` parameter
+
+### Improved
+- **Better Error Messages for Inference Rules**:
+  - Context-aware hints based on error type
+  - "unbound" errors now explain variable binding requirements
+  - "syntax" errors point to common issues
+  - All errors reference `cozo-memory-guide` for examples
+- **Parameter Documentation**: Explicit notes on parameter requirements
+  - `stop_session` / `stop_task` - Clarified use of `id` parameter
+  - `detect_conflicts` / `resolve_conflicts` - Confirmed entity_id requirement
+  - `suggest_connections` - Clarified only needs entity_id, not query
 
 ### Documentation
 - Tool descriptions now follow 3-tier approach: Brief description → Schema details → Steering file

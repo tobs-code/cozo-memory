@@ -2460,10 +2460,25 @@ ids[id] <- $ids
 
         const missingHeaders = expectedHeaders.filter(h => !actualHeaders.includes(h));
         if (missingHeaders.length > 0) {
-          return { error: `Invalid Datalog result set. Missing columns: ${missingHeaders.join(", ")}. Expected: ${expectedHeaders.join(", ")}` };
+          return { 
+            error: `Invalid Datalog result set. Missing columns: ${missingHeaders.join(", ")}. Expected: ${expectedHeaders.join(", ")}`,
+            hint: "Ensure all variables in the rule head are bound in the rule body. See cozo-memory-guide for examples."
+          };
         }
       } catch (validationError: any) {
-        return { error: `Datalog syntax error: ${validationError.message}` };
+        const errorMsg = validationError.message || String(validationError);
+        let hint = "";
+        
+        if (errorMsg.includes("unbound")) {
+          hint = "All variables in the rule head must appear in the rule body. Example: if you use 'relation_type' in the head, it must be bound to a value or extracted from a table in the body.";
+        } else if (errorMsg.includes("syntax")) {
+          hint = "Check Datalog syntax. Common issues: missing commas, incorrect table names, or malformed predicates.";
+        }
+        
+        return { 
+          error: `Datalog syntax error: ${errorMsg}`,
+          hint: hint || "See cozo-memory-guide for correct Datalog syntax and examples."
+        };
       }
 
       const id = uuidv4();
