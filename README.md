@@ -333,7 +333,7 @@ graph TB
 
 ## MCP Tools Overview
 
-The interface is reduced to **4 consolidated tools**:
+The interface is reduced to **5 consolidated tools**:
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
@@ -341,6 +341,7 @@ The interface is reduced to **4 consolidated tools**:
 | `query_memory` | Read operations | search, advancedSearch, context, graph_rag, graph_walking, agentic_search, adaptive_retrieval |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, semantic_walk |
 | `manage_system` | Maintenance | health, metrics, export, import, cleanup, defrag, reflect, snapshots |
+| `edit_user_profile` | User preferences | Edit global user profile with preferences and work style |
 
 > **See [docs/API.md](docs/API.md) for complete API reference with all parameters and examples**
 
