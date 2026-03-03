@@ -4262,26 +4262,72 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
     this.mcp.addTool({
       name: "query_memory",
       description: `Read access to memory. Select operation via 'action'.
-Supported actions:
-- 'search': Hybrid search (Vector + Keyword + Graph). Params: { query: string, limit?: number, entity_types?: string[], include_entities?: boolean, include_observations?: boolean }.
-  NOTE: Results from user profile ('global_user_profile') are automatically boosted and prioritized.
-- 'advancedSearch': Advanced search with metadata filters and graph constraints. Params: { query: string, limit?: number, filters?: { entityTypes?: string[], metadata?: object }, graphConstraints?: { requiredRelations?: string[], targetEntityIds?: string[] }, vectorOptions?: { topk?: number, efSearch?: number } }.
-- 'context': Retrieves comprehensive context. Params: { query: string, context_window?: number, time_range_hours?: number }. Returns entities, observations, graph relationships, and implicit inference suggestions.
-  NOTE: User profile is automatically included in context if relevant to enable personalization.
-- 'entity_details': Detailed view of an entity. Params: { entity_id: string, as_of?: string ('ISO-String' or 'NOW') }.
-- 'history': Retrieve historical evolution of an entity. Params: { entity_id: string }.
-- 'graph_rag': Graph-based reasoning (Hybrid RAG). Finds semantic vector seeds first, then expands via graph traversals. Ideal for multi-hop reasoning. Params: { query: string, max_depth?: number, limit?: number }.
-- 'graph_walking': Recursive semantic graph search. Starts at vector seeds or an entity and follows relationships to other semantically relevant entities. Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
-- 'agentic_search': Auto-Routing Search. Uses local LLM to analyze intent and routes the query automatically to the best strategy (Vector, Graph, or Community Summaries). Params: { query: string, limit?: number }.
-- 'adaptive_retrieval': GraphRAG-R1 inspired adaptive retrieval with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring. Automatically selects optimal strategy based on query complexity and historical performance. Params: { query: string, limit?: number }.
-- 'dynamic_fusion': Advanced multi-path fusion search combining Vector (HNSW), Sparse (keyword), FTS (full-text), and Graph traversal with configurable weights and strategies. Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }. Each path can be enabled/disabled and weighted independently. Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'. Returns results with path contribution details and performance stats.
-- 'get_zettelkasten_stats': Get Zettelkasten Memory Evolution statistics. No params required. Returns: { totalObservations, enrichedObservations, totalLinks, averageLinksPerNote, topKeywords, topTags, connectionTypes }.
-- 'get_activation_stats': Get ACT-R Memory Activation statistics. Params: { entity_id?: string }. Returns: { totalObservations, averageActivation, averageStrength, belowThreshold, aboveThreshold, distribution }.
-- 'get_salience_stats': Get Emotional Salience statistics. No params required. Returns: { totalObservations, withSalience, distribution, averageSalience, topKeywords }.
-- 'suggest_connections': Proactive connection suggestions for an entity. Params: { entity_id: string, max_suggestions?: number, min_confidence?: number }. Returns: { entity_id, suggestions: [{ entity_id, entity_name, entity_type, source, confidence, confidence_level, reason, metadata }], count }. Combines vector similarity, common neighbors, graph proximity, and inference strategies.
-- 'spreading_activation': SYNAPSE spreading activation search. Params: { query: string, seed_top_k?: number, limit?: number }. Returns: { scores: [{ entityId, activation, potential, source, hops }], iterations, converged, seedNodes }. Implements neural-inspired activation spreading with fan effect, lateral inhibition, and sigmoid activation.
 
-Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_fusion' provides the most control and transparency over retrieval paths. 'agentic_search' is the most adaptive. 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
+QUICK START - Which action should I use?
+┌─────────────────────────────────────────────────────────────────────────┐
+│ USE CASE                                    → RECOMMENDED ACTION         │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Simple fact lookup / Quick search          → 'search' (default choice)  │
+│ Need filters (type, metadata, relations)   → 'advancedSearch'           │
+│ Exploring a topic / Understanding context  → 'context'                  │
+│ Multi-hop reasoning / "How are X and Y     → 'graph_rag'                │
+│   connected?"                                                            │
+│ Need specific entity information           → 'entity_details'           │
+│ Track changes over time                    → 'history'                  │
+│ Let system auto-select best strategy       → 'adaptive_retrieval' ⭐    │
+│ Fine-tune search paths & weights            → 'dynamic_fusion'           │
+│ Advanced: Neural-inspired spreading        → 'spreading_activation'     │
+│ Statistics & analytics                     → 'get_*_stats'              │
+│ Find related entities                      → 'suggest_connections'      │
+└─────────────────────────────────────────────────────────────────────────┘
+
+⭐ RECOMMENDED FOR MOST CASES: Start with 'search' for simple queries or 'adaptive_retrieval' for automatic optimization.
+
+Supported actions:
+- 'search': Hybrid search combining vector similarity, keywords, and graph signals. Best for: Quick fact retrieval, simple queries, when you know what you're looking for.
+  Params: { query: string, limit?: number, entity_types?: string[], include_entities?: boolean, include_observations?: boolean }.
+  NOTE: Results from user profile ('global_user_profile') are automatically boosted and prioritized.
+
+- 'advancedSearch': Like 'search' but with filters and constraints. Best for: Filtering by entity type, metadata conditions, or requiring specific relationships.
+  Params: { query: string, limit?: number, filters?: { entityTypes?: string[], metadata?: object }, graphConstraints?: { requiredRelations?: string[], targetEntityIds?: string[] }, vectorOptions?: { topk?: number, efSearch?: number } }.
+
+- 'context': Comprehensive context retrieval with entities, observations, graph relationships, and inferences. Best for: Exploratory questions, understanding a topic broadly, when you need the "full picture".
+  Params: { query: string, context_window?: number, time_range_hours?: number }.
+  NOTE: User profile is automatically included if relevant for personalization.
+
+- 'entity_details': Detailed view of a single entity with all observations and relationships. Best for: When you have an entity_id and need complete information.
+  Params: { entity_id: string, as_of?: string ('ISO-String' or 'NOW') }.
+
+- 'history': Historical evolution of an entity over time. Best for: Tracking changes, understanding how information evolved.
+  Params: { entity_id: string }.
+
+- 'graph_rag': Graph-based reasoning with multi-hop traversal. Best for: "How are X and Y connected?", finding indirect relationships, complex reasoning chains.
+  Params: { query: string, max_depth?: number, limit?: number }.
+
+- 'graph_walking': Recursive semantic graph exploration. Best for: Following relationship chains, discovering connected knowledge.
+  Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
+
+- 'adaptive_retrieval': ⭐ Auto-optimizing retrieval that learns from usage. Best for: General-purpose queries when you want the system to automatically select the best strategy based on query complexity and historical performance.
+  Params: { query: string, limit?: number }.
+  Features: Progressive Retrieval Attenuation (PRA), Cost-Aware F1 scoring, learns over time.
+
+- 'dynamic_fusion': Advanced multi-path fusion with full control. Best for: Power users who want to fine-tune vector/sparse/FTS/graph weights and fusion strategies.
+  Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }.
+  Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'.
+  Returns: Results with path contribution details and performance stats.
+
+- 'agentic_search': Auto-routing search using local LLM. Best for: When you want the system to analyze intent and route automatically (experimental).
+  Params: { query: string, limit?: number }.
+
+- 'spreading_activation': Neural-inspired activation spreading (SYNAPSE). Best for: Advanced semantic exploration with fan effect and lateral inhibition.
+  Params: { query: string, seed_top_k?: number, limit?: number }.
+
+- 'suggest_connections': Proactive connection suggestions for an entity. Best for: Discovering potential relationships, finding similar entities.
+  Params: { entity_id: string, max_suggestions?: number, min_confidence?: number }.
+
+- 'get_zettelkasten_stats': Zettelkasten Memory Evolution statistics.
+- 'get_activation_stats': ACT-R Memory Activation statistics. Params: { entity_id?: string }.
+- 'get_salience_stats': Emotional Salience statistics.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5011,6 +5057,18 @@ Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_
       z.object({
         action: z.literal("hnsw_clusters"),
       }),
+      z.object({
+        action: z.literal("discover_logical_edges"),
+        entity_id: z.string().describe("ID of the entity to discover logical edges for"),
+      }),
+      z.object({
+        action: z.literal("materialize_logical_edges"),
+        entity_id: z.string().describe("ID of the entity to materialize logical edges for"),
+      }),
+      z.object({
+        action: z.literal("detect_temporal_patterns"),
+        entity_id: z.string().describe("ID of the entity to detect temporal patterns for"),
+      }),
     ]);
 
     const AnalyzeGraphParameters = z.object({
@@ -5481,6 +5539,15 @@ Supported actions:
         session_id: z.string().optional().describe("Session ID to compact"),
         entity_id: z.string().optional().describe("Entity ID to compact"),
         model: z.string().optional().default("demyagent-4b-i1:Q6_K"),
+      }),
+      z.object({
+        action: z.literal("compress_memory_levels"),
+        entity_id: z.string().describe("Entity ID to compress memory levels for"),
+        level: z.number().min(0).max(3).describe("Memory level to compress (0-3: L0_RAW, L1_SESSION, L2_WEEKLY, L3_MONTHLY)"),
+      }),
+      z.object({
+        action: z.literal("analyze_memory_distribution"),
+        entity_id: z.string().describe("Entity ID to analyze memory distribution for"),
       }),
     ]);
 
