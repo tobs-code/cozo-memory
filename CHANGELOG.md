@@ -5,6 +5,33 @@ All notable changes to CozoDB Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-03-03
+
+### Changed
+- **MCP Tool Descriptions Refactored**: Shortened tool descriptions following Anthropic's official MCP server best practices
+  - Reduced `query_memory` description from 60+ lines to 6 lines
+  - Reduced `mutate_memory` description from 30+ lines to 8 lines
+  - Reduced `analyze_graph` description from 18 lines to 7 lines
+  - Reduced `manage_system` description from 25 lines to 9 lines
+  - Reduced `edit_user_profile` description from 18 lines to 8 lines
+  - Improved parameter descriptions in Zod schemas for better clarity
+  - Replaced "CRITICAL RULES" with friendlier "Important" notes
+  - Removed large ASCII tables and verbose action lists from descriptions
+
+### Added
+- **Comprehensive Usage Guide**: New steering file `.kiro/steering/cozo-memory-guide.md`
+  - Detailed action reference tables for all tools
+  - Quick start examples for common use cases
+  - Best practices and performance tips
+  - Inference rule documentation with examples
+  - Memory hierarchy and time-travel query guides
+  - Manual inclusion via `#cozo-memory-guide` in Kiro
+
+### Documentation
+- Tool descriptions now follow 3-tier approach: Brief description → Schema details → Steering file
+- All detailed documentation moved to steering file for on-demand access
+- No breaking changes - all functionality remains identical
+
 ## [2.15.0] - 2026-03-03
 
 ### Added

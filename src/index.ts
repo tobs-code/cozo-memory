@@ -3874,37 +3874,15 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
     this.mcp.addTool({
       name: "mutate_memory",
       description: `Write access to memory. Select operation via 'action'.
-Supported actions:
-- 'create_entity': Creates a new entity. Params: { name: string, type: string, metadata?: object }
-- 'update_entity': Updates an existing entity. Params: { id: string, name?: string, type?: string, metadata?: object }
-- 'delete_entity': Deletes an entity and its observations. Params: { entity_id: string }
-- 'add_observation': Stores a fact. Params: { entity_id?: string, entity_name?: string, entity_type?: string, text: string, metadata?: object, deduplicate?: boolean }. Automatic deduplication active (can be disabled).
-  NOTE: Use special 'entity_id': 'global_user_profile' to store persistent user preferences (likes, work style, dislikes). These are prioritized in searches.
-- 'create_relation': Creates a connection between entities. Params: { from_id: string, to_id: string, relation_type: string, strength?: number (0-1), metadata?: object }. No self-references allowed.
-- 'run_transaction': Executes multiple operations atomically in one transaction. Params: { operations: Array<{ action: "create_entity"|"add_observation"|"create_relation", params: object }> }. Ideal for complex, related changes.
-- 'add_inference_rule': Adds a custom Datalog inference rule. Params: { name: string, datalog: string }.
-  IMPORTANT: The Datalog result set MUST return exactly 5 columns: [from_id, to_id, relation_type, confidence, reason].
-  Use '$id' as placeholder for the start entity.
-  Available tables:
-  - *entity{id, name, type, metadata, @ "NOW"}
-  - *relationship{from_id, to_id, relation_type, strength, metadata, @ "NOW"}
-  - *observation{id, entity_id, text, metadata, @ "NOW"}
-  Example (Manager Transitivity):
-  '?[from_id, to_id, relation_type, confidence, reason] := *relationship{from_id: $id, to_id: mid, relation_type: "manager_of", @ "NOW"}, *relationship{from_id: mid, to_id: target, relation_type: "manager_of", @ "NOW"}, from_id = $id, to_id = target, relation_type = "ober_manager_von", confidence = 0.6, reason = "Transitive Manager Path"'
-- 'ingest_file': Bulk import of documents (Markdown/JSON). Supports chunking (paragraphs) and automatic entity creation. Params: { entity_id | entity_name (required), format, content, ... }. Ideal for quickly populating memory from existing notes.
-- 'start_session': Initializes a new session for context tracking. Params: { name?: string, metadata?: object }.
-- 'stop_session': Closes a session. Params: { id: string }.
-- 'start_task': Initializes a new task within a session. Params: { name: string, session_id?: string, metadata?: object }.
-- 'stop_task': Marks a task as completed. Params: { id: string }.
-- 'invalidate_observation': Invalidates (soft-deletes) an observation at the current time. Params: { observation_id: string }.
-- 'invalidate_relation': Invalidates (soft-deletes) a relationship at the current time. Params: { from_id: string, to_id: string, relation_type: string }.
-- 'enrich_observation': Manually trigger Zettelkasten enrichment for an observation. Params: { observation_id: string }. Extracts keywords/tags, finds related observations, creates bidirectional links, and updates metadata.
-- 'record_memory_access': Record access to an observation for ACT-R memory activation tracking. Params: { observation_id: string }. Updates access_count and last_access_time metadata.
-- 'prune_weak_memories': Delete observations with activation below retention threshold. Params: { dry_run?: boolean (default: true), entity_id?: string }. Returns: { pruned: number, preserved: number, candidates: ActivationScore[] }.
-- 'detect_conflicts': Detect temporal conflicts for an entity. Params: { entity_id: string }. Returns: { conflicts: [{ older_observation_id, newer_observation_id, conflict_type, confidence, reason }], count }. Detects redundancy, contradictions, and superseded facts.
-- 'resolve_conflicts': Resolve temporal conflicts by invalidating older observations. Params: { entity_id: string, auto_resolve?: boolean }. Returns: { resolved_conflicts, invalidated_observations, audit_observations }. Creates audit trail if enabled.
 
-Validation: Invalid syntax or missing columns in inference rules will result in errors.`,
+Common actions: create_entity, add_observation, create_relation, update_entity, delete_entity
+Advanced: run_transaction, add_inference_rule, ingest_file, session/task management, conflict detection
+
+Use entity_id='global_user_profile' for storing persistent user preferences (automatically boosted in searches).
+
+For detailed action descriptions, parameters, and examples, see the cozo-memory-guide steering file.
+
+Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_type, confidence, reason]. Invalid syntax will result in errors.`,
       parameters: MutateMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -4238,96 +4216,36 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
     const QueryMemoryParameters = z.object({
       action: z
         .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query"])
-        .describe("Action (determines which fields are required)"),
-      query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search/dynamic_fusion/adaptive_retrieval"),
-      limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking/dynamic_fusion/adaptive_retrieval"),
-      session_id: z.string().optional().describe("Optional session ID for context boosting"),
-      task_id: z.string().optional().describe("Optional task ID for context boosting"),
-      filters: z.any().optional().describe("Only for advancedSearch"),
-      graphConstraints: z.any().optional().describe("Only for advancedSearch"),
-      vectorOptions: z.any().optional().describe("Only for advancedSearch"),
-      entity_types: z.array(z.string()).optional().describe("Only for search"),
-      include_entities: z.boolean().optional().describe("Only for search"),
-      include_observations: z.boolean().optional().describe("Only for search"),
-      context_window: z.number().optional().describe("Only for context"),
-      time_range_hours: z.number().optional().describe("Only for context"),
-      entity_id: z.string().optional().describe("Required for entity_details/history"),
-      as_of: z.string().optional().describe("Only for entity_details: ISO string or 'NOW'"),
-      max_depth: z.number().optional().describe("Only for graph_rag/graph_walking: Maximum expansion depth"),
-      start_entity_id: z.string().optional().describe("Only for graph_walking: Start entity"),
-      rerank: z.boolean().optional().describe("Only for search/advancedSearch/agentic_search: Enable Cross-Encoder reranking"),
-      config: z.any().optional().describe("Only for dynamic_fusion: Fusion configuration object"),
+        .describe("Retrieval strategy - use 'search' for simple queries, 'adaptive_retrieval' for auto-optimization, 'context' for exploration"),
+      query: z.string().optional().describe("Search query text (required for most actions)"),
+      limit: z.number().optional().describe("Maximum number of results to return (default: 10)"),
+      session_id: z.string().optional().describe("Session ID for context boosting - prioritizes results from this session"),
+      task_id: z.string().optional().describe("Task ID for context boosting - prioritizes results from this task"),
+      filters: z.any().optional().describe("For advancedSearch: Filter by entity types, metadata conditions"),
+      graphConstraints: z.any().optional().describe("For advancedSearch: Require specific relationships or target entities"),
+      vectorOptions: z.any().optional().describe("For advancedSearch: Vector search tuning (topk, efSearch)"),
+      entity_types: z.array(z.string()).optional().describe("For search: Filter results by entity type"),
+      include_entities: z.boolean().optional().describe("For search: Include entities in results (default: true)"),
+      include_observations: z.boolean().optional().describe("For search: Include observations in results (default: true)"),
+      context_window: z.number().optional().describe("For context: Number of related entities to include (default: 5)"),
+      time_range_hours: z.number().optional().describe("For context: Time window in hours for temporal filtering"),
+      entity_id: z.string().optional().describe("For entity_details/history: Entity ID to query"),
+      as_of: z.string().optional().describe("For entity_details: Point-in-time query (ISO timestamp or 'NOW')"),
+      max_depth: z.number().optional().describe("For graph_rag/graph_walking: Maximum traversal depth (hops)"),
+      start_entity_id: z.string().optional().describe("For graph_walking: Starting entity for traversal"),
+      rerank: z.boolean().optional().describe("For search/advancedSearch: Enable Cross-Encoder reranking for higher precision"),
+      config: z.any().optional().describe("For dynamic_fusion: Fine-tune vector/sparse/FTS/graph weights and fusion strategy"),
     });
 
     this.mcp.addTool({
       name: "query_memory",
-      description: `Read access to memory. Select operation via 'action'.
+      description: `Read access to memory with multiple retrieval strategies.
 
-QUICK START - Which action should I use?
-┌─────────────────────────────────────────────────────────────────────────┐
-│ USE CASE                                    → RECOMMENDED ACTION         │
-├─────────────────────────────────────────────────────────────────────────┤
-│ Simple fact lookup / Quick search          → 'search' (default choice)  │
-│ Need filters (type, metadata, relations)   → 'advancedSearch'           │
-│ Exploring a topic / Understanding context  → 'context'                  │
-│ Multi-hop reasoning / "How are X and Y     → 'graph_rag'                │
-│   connected?"                                                            │
-│ Need specific entity information           → 'entity_details'           │
-│ Track changes over time                    → 'history'                  │
-│ Let system auto-select best strategy       → 'adaptive_retrieval' ⭐    │
-│ Fine-tune search paths & weights            → 'dynamic_fusion'           │
-│ Advanced: Neural-inspired spreading        → 'spreading_activation'     │
-│ Statistics & analytics                     → 'get_*_stats'              │
-│ Find related entities                      → 'suggest_connections'      │
-└─────────────────────────────────────────────────────────────────────────┘
+Use 'search' for quick lookups, 'adaptive_retrieval' for auto-optimization, or 'context' for comprehensive exploration.
 
-⭐ RECOMMENDED FOR MOST CASES: Start with 'search' for simple queries or 'adaptive_retrieval' for automatic optimization.
+Available actions: search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, adaptive_retrieval, dynamic_fusion, agentic_search, spreading_activation, suggest_connections, get_zettelkasten_stats, get_activation_stats, get_salience_stats, qafd_search, hierarchical_memory_query.
 
-Supported actions:
-- 'search': Hybrid search combining vector similarity, keywords, and graph signals. Best for: Quick fact retrieval, simple queries, when you know what you're looking for.
-  Params: { query: string, limit?: number, entity_types?: string[], include_entities?: boolean, include_observations?: boolean }.
-  NOTE: Results from user profile ('global_user_profile') are automatically boosted and prioritized.
-
-- 'advancedSearch': Like 'search' but with filters and constraints. Best for: Filtering by entity type, metadata conditions, or requiring specific relationships.
-  Params: { query: string, limit?: number, filters?: { entityTypes?: string[], metadata?: object }, graphConstraints?: { requiredRelations?: string[], targetEntityIds?: string[] }, vectorOptions?: { topk?: number, efSearch?: number } }.
-
-- 'context': Comprehensive context retrieval with entities, observations, graph relationships, and inferences. Best for: Exploratory questions, understanding a topic broadly, when you need the "full picture".
-  Params: { query: string, context_window?: number, time_range_hours?: number }.
-  NOTE: User profile is automatically included if relevant for personalization.
-
-- 'entity_details': Detailed view of a single entity with all observations and relationships. Best for: When you have an entity_id and need complete information.
-  Params: { entity_id: string, as_of?: string ('ISO-String' or 'NOW') }.
-
-- 'history': Historical evolution of an entity over time. Best for: Tracking changes, understanding how information evolved.
-  Params: { entity_id: string }.
-
-- 'graph_rag': Graph-based reasoning with multi-hop traversal. Best for: "How are X and Y connected?", finding indirect relationships, complex reasoning chains.
-  Params: { query: string, max_depth?: number, limit?: number }.
-
-- 'graph_walking': Recursive semantic graph exploration. Best for: Following relationship chains, discovering connected knowledge.
-  Params: { query: string, start_entity_id?: string, max_depth?: number, limit?: number }.
-
-- 'adaptive_retrieval': ⭐ Auto-optimizing retrieval that learns from usage. Best for: General-purpose queries when you want the system to automatically select the best strategy based on query complexity and historical performance.
-  Params: { query: string, limit?: number }.
-  Features: Progressive Retrieval Attenuation (PRA), Cost-Aware F1 scoring, learns over time.
-
-- 'dynamic_fusion': Advanced multi-path fusion with full control. Best for: Power users who want to fine-tune vector/sparse/FTS/graph weights and fusion strategies.
-  Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }.
-  Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'.
-  Returns: Results with path contribution details and performance stats.
-
-- 'agentic_search': Auto-routing search using local LLM. Best for: When you want the system to analyze intent and route automatically (experimental).
-  Params: { query: string, limit?: number }.
-
-- 'spreading_activation': Neural-inspired activation spreading (SYNAPSE). Best for: Advanced semantic exploration with fan effect and lateral inhibition.
-  Params: { query: string, seed_top_k?: number, limit?: number }.
-
-- 'suggest_connections': Proactive connection suggestions for an entity. Best for: Discovering potential relationships, finding similar entities.
-  Params: { entity_id: string, max_suggestions?: number, min_confidence?: number }.
-
-- 'get_zettelkasten_stats': Zettelkasten Memory Evolution statistics.
-- 'get_activation_stats': ACT-R Memory Activation statistics. Params: { entity_id?: string }.
-- 'get_salience_stats': Emotional Salience statistics.`,
+Note: User profile observations (entity_id='global_user_profile') are automatically boosted in searches. For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5089,24 +5007,13 @@ Supported actions:
     this.mcp.addTool({
       name: "analyze_graph",
       description: `Graph analysis and advanced retrieval strategies. Select operation via 'action'.
-Supported actions:
-- 'explore': Navigates through the graph. Params: { start_entity: string, end_entity?: string, max_hops?: number, relation_types?: string[] }.
-  * Without end_entity: Returns the neighborhood (up to 5 hops).
-  * With end_entity: Finds the shortest path (BFS).
-- 'communities': Recomputes entity groups (communities) using Label Propagation.
-- 'pagerank': Calculates the importance of entities (Top 10).
-- 'betweenness': Finds central bridge entities (Betweenness Centrality).
-- 'hits': Identifies Hubs and Authorities.
-- 'connected_components': Identifies isolated subgraphs.
-- 'shortest_path': Calculates the shortest path between two entities (Dijkstra). Params: { start_entity: string, end_entity: string }.
-- 'bridge_discovery': Identifies bridge entities between communities.
-- 'infer_relations': Starts the inference engine for an entity. Params: { entity_id: string }.
-- 'get_relation_evolution': Tracks the temporal evolution of relationships. Params: { from_id: string, to_id?: string }.
-- 'semantic_walk': Performs a recursive "Graph Walk" that follows both explicit relationships and semantic similarity. Params: { start_entity: string, max_depth?: number, min_similarity?: number }.
-- 'hnsw_clusters': Analyzes clusters directly on the HNSW graph (Layer 0). Extremely fast as no vector calculations are needed.
-- 'discover_logical_edges': Discovers implicit logical edges for an entity (same category, type, hierarchical, contextual, transitive). Params: { entity_id: string }.
-- 'materialize_logical_edges': Materializes discovered logical edges as actual relationships in the graph. Params: { entity_id: string }.
-- 'detect_temporal_patterns': Detects temporal patterns in entity observations (periodic, trending, seasonal). Params: { entity_id: string }.`,
+
+Common operations: explore (navigate/find paths), communities (detect groups), pagerank (entity importance), shortest_path
+Advanced: semantic_walk, infer_relations, bridge_discovery, hnsw_clusters, temporal patterns
+
+Use 'explore' without end_entity for neighborhood, with end_entity for shortest path.
+
+For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
       parameters: AnalyzeGraphParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5584,32 +5491,16 @@ Supported actions:
     this.mcp.addTool({
       name: "manage_system",
       description: `System maintenance and memory management. Select operation via 'action'.
-Supported actions:
-- 'health': Status check. Returns DB counts, embedding cache statistics, and performance metrics.
-- 'metrics': Detailed metrics. Returns operation counts, error statistics, and performance data.
-- 'export_memory': Export memory to various formats. Params: { format: 'json'|'markdown'|'obsidian', includeMetadata?: boolean, includeRelationships?: boolean, includeObservations?: boolean, entityTypes?: string[], since?: number }.
-  * format='json': Native Cozo format (re-importable)
-  * format='markdown': Human-readable markdown document
-  * format='obsidian': ZIP archive with wiki-links, ready for Obsidian vault
-- 'import_memory': Import memory from external sources. Params: { data: string|object, sourceFormat: 'mem0'|'memgpt'|'markdown'|'cozo', mergeStrategy?: 'skip'|'overwrite'|'merge', defaultEntityType?: string }.
-  * sourceFormat='mem0': Import from Mem0 format (user_id becomes entity)
-  * sourceFormat='memgpt': Import from MemGPT archival/recall memory
-  * sourceFormat='markdown': Parse markdown sections as entities
-  * sourceFormat='cozo': Import from native Cozo JSON export
-- 'snapshot_create': Creates a backup point. Params: { metadata?: object }.
-- 'snapshot_list': Lists all available snapshots.
-- 'snapshot_diff': Compares two snapshots. Params: { snapshot_id_a: string, snapshot_id_b: string }.
-- 'cleanup': Janitor service for consolidation. Params: { confirm: boolean, older_than_days?: number, max_observations?: number, min_entity_degree?: number, model?: string }.
-  * With confirm=false: Dry-Run (shows candidates).
-  * With confirm=true: Merges old/isolated fragments using LLM (Executive Summary) and removes noise.
-- 'defrag': Memory defragmentation. Reorganizes memory structure by detecting/merging duplicates, connecting fragmented knowledge islands, and removing orphaned entities. Params: { confirm: boolean, similarity_threshold?: number (0.8-1.0, default 0.95), min_island_size?: number (1-10, default 3) }.
-  * With confirm=false: Dry-Run (shows analysis and candidates).
-  * With confirm=true: Executes defragmentation and returns statistics.
-- 'reflect': Reflection service. Analyzes memory for contradictions and insights. Params: { entity_id?: string, model?: string }.
-- 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.
-- 'summarize_communities': Hierarchical GraphRAG. Generates summaries for entity clusters. Params: { model?: string, min_community_size?: number }.
-- 'compress_memory_levels': Hierarchical memory compression. Compresses observations at a specific memory level using LLM summarization. Params: { entity_id: string, level: number (0-3) }.
-- 'analyze_memory_distribution': Analyzes memory distribution across hierarchical levels. Params: { entity_id: string }.`,
+
+Monitoring: health (status check), metrics (detailed stats)
+Data portability: export_memory (JSON/Markdown/Obsidian), import_memory (Mem0/MemGPT/Cozo)
+Backups: snapshot_create, snapshot_list, snapshot_diff
+Optimization: cleanup (LLM consolidation), defrag (merge duplicates), reflect (find contradictions)
+Advanced: summarize_communities, compress_memory_levels, analyze_memory_distribution
+
+Important: Use confirm=false for dry-run before cleanup/defrag. clear_memory requires confirm=true.
+
+For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
       parameters: ManageSystemParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5972,23 +5863,14 @@ Supported actions:
     this.mcp.addTool({
       name: "edit_user_profile",
       description: `Direct management of the global user profile ('global_user_profile').
-This tool allows manual editing of user preferences, work style, and profile metadata.
 
-The user profile is automatically boosted in all searches (50% score boost) and used for personalization.
+Edit user preferences, work style, and profile metadata. The user profile is automatically boosted in all searches (50% score boost).
 
-Parameters:
-- name?: string - Update the profile name (default: "The User")
-- type?: string - Update the profile type (default: "User")
-- metadata?: object - Update or merge profile metadata
-- observations?: Array<{ text: string, metadata?: object }> - Add new preference observations
-- clear_observations?: boolean - Remove all existing observations before adding new ones
+Parameters: name, type, metadata, observations (array), clear_observations (boolean)
 
-Examples:
-- Add preferences: { observations: [{ text: "Prefers TypeScript over JavaScript" }] }
-- Update metadata: { metadata: { timezone: "Europe/Berlin", language: "de" } }
-- Reset and set new preferences: { clear_observations: true, observations: [{ text: "New preference" }] }
+Example: { observations: [{ text: "Prefers TypeScript over JavaScript" }] }
 
-Note: Use 'mutate_memory' with action='add_observation' and entity_id='global_user_profile' for implicit preference updates.`,
+Note: Use mutate_memory with action='add_observation' and entity_id='global_user_profile' for implicit updates.`,
       parameters: z.object({
         name: z.string().optional().describe("New name for the user profile"),
         type: z.string().optional().describe("New type for the user profile"),
