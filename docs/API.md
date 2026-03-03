@@ -14,7 +14,7 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 | `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compress_memory_levels, analyze_memory_distribution, compact |
 | `edit_user_profile` | User preferences | Edit global user profile with preferences and work style |
 
-**For detailed documentation, examples, and best practices, see `.kiro/steering/cozo-memory-guide.md`**
+**For detailed documentation, examples, and best practices, see `docs/USAGE-GUIDE.md`**
 
 ---
 
@@ -232,7 +232,7 @@ When adding custom inference rules with `add_inference_rule`, the Datalog query 
   reason = "Transitive Manager Path"
 ```
 
-**For more examples and common mistakes, see `.kiro/steering/cozo-memory-guide.md`**
+**For more examples and common mistakes, see `docs/USAGE-GUIDE.md`**
 
 ---
 
@@ -350,7 +350,7 @@ For comprehensive documentation including:
 - Parameter requirements and examples
 - Troubleshooting and error handling
 
-**See:** `.kiro/steering/cozo-memory-guide.md` (access via `#cozo-memory-guide` in Kiro)
+**See:** `docs/USAGE-GUIDE.md`
 
 ---
 

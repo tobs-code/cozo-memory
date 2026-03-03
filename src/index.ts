@@ -2462,7 +2462,7 @@ ids[id] <- $ids
         if (missingHeaders.length > 0) {
           return { 
             error: `Invalid Datalog result set. Missing columns: ${missingHeaders.join(", ")}. Expected: ${expectedHeaders.join(", ")}`,
-            hint: "Ensure all variables in the rule head are bound in the rule body. See cozo-memory-guide for examples."
+            hint: "Ensure all variables in the rule head are bound in the rule body. See docs/USAGE-GUIDE.md for examples."
           };
         }
       } catch (validationError: any) {
@@ -2477,7 +2477,7 @@ ids[id] <- $ids
         
         return { 
           error: `Datalog syntax error: ${errorMsg}`,
-          hint: hint || "See cozo-memory-guide for correct Datalog syntax and examples."
+          hint: hint || "See docs/USAGE-GUIDE.md for correct Datalog syntax and examples."
         };
       }
 
@@ -3895,7 +3895,7 @@ Advanced: run_transaction, add_inference_rule, ingest_file, session/task managem
 
 Use entity_id='global_user_profile' for storing persistent user preferences (automatically boosted in searches).
 
-For detailed action descriptions, parameters, and examples, see the cozo-memory-guide steering file.
+For detailed action descriptions, parameters, and examples, see docs/USAGE-GUIDE.md.
 
 Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_type, confidence, reason]. Invalid syntax will result in errors.`,
       parameters: MutateMemoryParameters,
@@ -4268,7 +4268,7 @@ Available actions:
 - suggest_connections: Connection suggestions with entity_id (required)
 - get_zettelkasten_stats, get_activation_stats, get_salience_stats: Statistics (no params required)
 
-Note: User profile observations (entity_id='global_user_profile') are automatically boosted in searches. For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
+Note: User profile observations (entity_id='global_user_profile') are automatically boosted in searches. For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
       parameters: QueryMemoryParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5036,7 +5036,7 @@ Advanced: semantic_walk, infer_relations, bridge_discovery, hnsw_clusters, tempo
 
 Use 'explore' without end_entity for neighborhood, with end_entity for shortest path.
 
-For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
+For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
       parameters: AnalyzeGraphParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5525,7 +5525,7 @@ Important: Use confirm=false for dry-run before cleanup/defrag. clear_memory req
 
 Note: For statistics (get_salience_stats, get_activation_stats, get_zettelkasten_stats), use query_memory tool instead.
 
-For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
+For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
       parameters: ManageSystemParameters,
       execute: async (args: any) => {
         await this.initPromise;

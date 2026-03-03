@@ -19,13 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed large ASCII tables and verbose action lists from descriptions
 
 ### Added
-- **Comprehensive Usage Guide**: New steering file `.kiro/steering/cozo-memory-guide.md`
+- **Comprehensive Usage Guide**: New documentation file `docs/USAGE-GUIDE.md`
   - Detailed action reference tables for all tools
   - Quick start examples for common use cases
   - Best practices and performance tips
   - Inference rule documentation with examples
   - Memory hierarchy and time-travel query guides
-  - Manual inclusion via `#cozo-memory-guide` in Kiro
 - **Improved Inference Rule Documentation**:
   - "Important: All Variables Must Be Bound" section
   - Common mistakes with ❌/✅ examples
@@ -41,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Context-aware hints based on error type
   - "unbound" errors now explain variable binding requirements
   - "syntax" errors point to common issues
-  - All errors reference `cozo-memory-guide` for examples
+  - All errors reference `docs/USAGE-GUIDE.md` for examples
 - **Parameter Documentation**: Explicit notes on parameter requirements
   - `stop_session` / `stop_task` - Clarified use of `id` parameter
   - `detect_conflicts` / `resolve_conflicts` - Confirmed entity_id requirement
