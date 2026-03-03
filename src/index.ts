@@ -4258,7 +4258,15 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
 
 Use 'search' for quick lookups, 'adaptive_retrieval' for auto-optimization, or 'context' for comprehensive exploration.
 
-Available actions: search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, adaptive_retrieval, dynamic_fusion, agentic_search, spreading_activation, suggest_connections, get_zettelkasten_stats, get_activation_stats, get_salience_stats, qafd_search, hierarchical_memory_query.
+Available actions:
+- search, advancedSearch: Hybrid search with query (required)
+- context: Context retrieval with query (required)
+- entity_details, history: Entity info with entity_id (required)
+- graph_rag, graph_walking: Graph traversal with query (required)
+- adaptive_retrieval, dynamic_fusion, agentic_search: Advanced search with query (required)
+- spreading_activation, qafd_search, hierarchical_memory_query: Specialized search with query (required)
+- suggest_connections: Connection suggestions with entity_id (required)
+- get_zettelkasten_stats, get_activation_stats, get_salience_stats: Statistics (no params required)
 
 Note: User profile observations (entity_id='global_user_profile') are automatically boosted in searches. For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
       parameters: QueryMemoryParameters,
@@ -5511,9 +5519,11 @@ Monitoring: health (status check), metrics (detailed stats)
 Data portability: export_memory (JSON/Markdown/Obsidian), import_memory (Mem0/MemGPT/Cozo)
 Backups: snapshot_create, snapshot_list, snapshot_diff
 Optimization: cleanup (LLM consolidation), defrag (merge duplicates), reflect (find contradictions)
-Advanced: summarize_communities, compress_memory_levels, analyze_memory_distribution
+Advanced: summarize_communities, compress_memory_levels, analyze_memory_distribution, compact
 
 Important: Use confirm=false for dry-run before cleanup/defrag. clear_memory requires confirm=true.
+
+Note: For statistics (get_salience_stats, get_activation_stats, get_zettelkasten_stats), use query_memory tool instead.
 
 For detailed action descriptions and parameters, see the cozo-memory-guide steering file.`,
       parameters: ManageSystemParameters,
