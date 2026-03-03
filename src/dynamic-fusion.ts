@@ -173,11 +173,25 @@ export class DynamicFusionSearch {
   ): Promise<{ results: FusionResult[]; stats: FusionStats }> {
     const startTime = Date.now();
     
+    // Merge config with defaults first
+    const fullConfig = this.mergeConfig(config);
+    
+    // Validate topK values to prevent errors
+    if (fullConfig.vector && fullConfig.vector.topK <= 0) {
+      console.error('[DynamicFusion] Invalid vector.topK:', fullConfig.vector.topK, '- must be positive. Defaulting to 20.');
+      fullConfig.vector.topK = 20;
+    }
+    if (fullConfig.sparse && fullConfig.sparse.topK <= 0) {
+      console.error('[DynamicFusion] Invalid sparse.topK:', fullConfig.sparse.topK, '- must be positive. Defaulting to 20.');
+      fullConfig.sparse.topK = 20;
+    }
+    if (fullConfig.fts && fullConfig.fts.topK <= 0) {
+      console.error('[DynamicFusion] Invalid fts.topK:', fullConfig.fts.topK, '- must be positive. Defaulting to 20.');
+      fullConfig.fts.topK = 20;
+    }
+    
     // Get adaptive weights based on query classification
     const adaptiveWeights = await this.adaptiveQueryFusion.getAdaptiveWeights(query);
-    
-    // Merge config with defaults first, then apply adaptive weights
-    const fullConfig = this.mergeConfig(config);
     
     // Override weights with adaptive values
     fullConfig.vector!.weight = adaptiveWeights.vector;

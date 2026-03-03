@@ -2,6 +2,8 @@ import { CozoDb } from "cozo-node";
 import { EmbeddingService } from "./embedding-service";
 import crypto from "crypto";
 import { RerankerService } from "./reranker-service";
+import { logger } from "./logger";
+import { perfMonitor } from "./performance-monitor";
 
 export interface SearchResult {
   id: string;
@@ -213,23 +215,33 @@ export class HybridSearch {
   }
 
   async advancedSearch(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
-    console.error("[HybridSearch] Starting advancedSearch with options:", JSON.stringify(options, null, 2));
+    logger.debug('HybridSearch', 'Starting advancedSearch', { query: options.query, limit: options.limit });
     const { query, limit = 10, filters, graphConstraints, vectorParams } = options;
+
+    // Validate limit to prevent infinite loops
+    if (limit <= 0) {
+      logger.warn('HybridSearch', `Invalid limit value: ${limit} - must be positive. Defaulting to 10.`);
+      options.limit = 10;
+    }
+
+    const endTimer = perfMonitor.startTimer('advancedSearch');
 
     let queryEmbedding: number[];
     try {
       queryEmbedding = await this.embeddingService.embed(query);
     } catch (e: any) {
-      console.error("[HybridSearch] Embedding failed", e);
+      logger.error('HybridSearch', 'Embedding failed', e);
+      endTimer();
       throw e;
     }
 
     const cachedResults = await this.tryCacheLookup(options, queryEmbedding);
     if (cachedResults !== null) {
-      console.error("[HybridSearch] Cache hit for advancedSearch");
+      logger.debug('HybridSearch', 'Cache hit for advancedSearch');
+      endTimer();
       return cachedResults;
     }
-    console.error("[HybridSearch] Cache miss, executing Datalog query...");
+    logger.trace('HybridSearch', 'Cache miss, executing Datalog query...');
 
     let topk = limit * 2;
     const hasFilters = (filters?.metadata && Object.keys(filters.metadata).length > 0) ||
@@ -291,7 +303,7 @@ export class HybridSearch {
     }
     semanticCall += `}`;
 
-    let bodyConstraints = [semanticCall, `*entity{id, name, type, metadata, created_at, @ "NOW"}`];
+    let bodyConstraints = [semanticCall, `*entity{id, name, type, metadata, created_at}`];
     if (metaJoins.length > 0) {
       bodyConstraints.push(...metaJoins);
     }
@@ -321,18 +333,18 @@ export class HybridSearch {
 
     const helperRules: string[] = [
       `rank_val[id, r] := *entity_rank{entity_id: id, pagerank: r}`,
-      `rank_val[id, r] := *entity{id, @ "NOW"}, not *entity_rank{entity_id: id}, r = 0.0`
+      `rank_val[id, r] := *entity{id}, not *entity_rank{entity_id: id}, r = 0.0`
     ];
     if (graphConstraints?.requiredRelations && graphConstraints.requiredRelations.length > 0) {
       helperRules.push(
-        `rel_match[id, rel_type] := *relationship{from_id: id, relation_type: rel_type, @ "NOW"}`,
-        `rel_match[id, rel_type] := *relationship{to_id: id, relation_type: rel_type, @ "NOW"}`
+        `rel_match[id, rel_type] := *relationship{from_id: id, relation_type: rel_type}`,
+        `rel_match[id, rel_type] := *relationship{to_id: id, relation_type: rel_type}`
       );
     }
     if (graphConstraints?.targetEntityIds && graphConstraints.targetEntityIds.length > 0) {
       helperRules.push(
-        `target_match[id, target_id] := *relationship{from_id: id, to_id: target_id, @ "NOW"}`,
-        `target_match[id, target_id] := *relationship{to_id: id, from_id: target_id, @ "NOW"}`
+        `target_match[id, target_id] := *relationship{from_id: id, to_id: target_id}`,
+        `target_match[id, target_id] := *relationship{to_id: id, from_id: target_id}`
       );
     }
 
@@ -382,10 +394,15 @@ export class HybridSearch {
       }
 
       await this.updateCache(options, queryEmbedding, finalResults);
+      endTimer();
       return finalResults;
     } catch (e: any) {
-      console.error("[HybridSearch] Error in advancedSearch:", e.message);
-      return this.search(options);
+      logger.error('HybridSearch', 'Error in advancedSearch', e.message);
+      perfMonitor.recordMetric('advancedSearch', 0, true);
+      endTimer();
+      // Prevent infinite recursion by returning empty results instead of calling search()
+      logger.warn('HybridSearch', 'Returning empty results to prevent infinite loop');
+      return [];
     }
   }
 
@@ -415,8 +432,16 @@ export class HybridSearch {
   }
 
   async graphRag(options: AdvancedHybridQueryOptions): Promise<SearchResult[]> {
-    console.error("[HybridSearch] Starting graphRag with options:", JSON.stringify(options, null, 2));
+    logger.debug('HybridSearch', 'Starting graphRag', { query: options.query, limit: options.limit });
     const { query, limit = 5, filters, graphConstraints } = options;
+    
+    // Validate limit to prevent infinite loops
+    if (limit <= 0) {
+      logger.warn('HybridSearch', `Invalid limit value: ${limit} - must be positive. Defaulting to 5.`);
+      options.limit = 5;
+    }
+    
+    const endTimer = perfMonitor.startTimer('graphRag');
     const maxDepth = graphConstraints?.maxDepth || 2;
     const queryEmbedding = await this.embeddingService.embed(query);
 
@@ -464,7 +489,7 @@ export class HybridSearch {
     // 4. Calculate a combined score based on vector distance, graph distance, and PageRank
     const datalogQuery = `
       rank_val[id, r] := *entity_rank{entity_id: id, pagerank: r}
-      rank_val[id, r] := *entity{id, @ "NOW"}, not *entity_rank{entity_id: id}, r = 0.0
+      rank_val[id, r] := *entity{id}, not *entity_rank{entity_id: id}, r = 0.0
 
       seeds[id, score] := ${seedConstraints.join(", ")}, score = 1.0 - dist
       
@@ -474,7 +499,7 @@ export class HybridSearch {
 
       result_entities[id, final_score, depth] := path[seed_id, id, depth], seeds[seed_id, seed_score], rank_val[id, pr], final_score = seed_score * (1.0 - 0.2 * depth)
       
-      ?[id, name, type, metadata, created_at, score, source, text] := result_entities[id, score, depth], *entity{id, name, type, metadata, created_at, @ "NOW"}, source = 'graph_rag_entity', text = ''
+      ?[id, name, type, metadata, created_at, score, source, text] := result_entities[id, score, depth], *entity{id, name, type, metadata, created_at}, source = 'graph_rag_entity', text = ''
       
       :sort -score
       :limit $limit
@@ -514,20 +539,34 @@ export class HybridSearch {
       const decayedResults = this.applyTimeDecay(searchResults);
 
       if (options.rerank) {
-        return await this.applyReranking(options.query, decayedResults);
+        const reranked = await this.applyReranking(options.query, decayedResults);
+        endTimer();
+        return reranked;
       }
 
+      endTimer();
       return decayedResults;
     } catch (e: any) {
-      console.error("[HybridSearch] Error in graphRag:", e.message);
-      // Fallback to normal search on error
-      return this.search(options);
+      logger.error('HybridSearch', 'Error in graphRag', e.message);
+      perfMonitor.recordMetric('graphRag', 0, true);
+      endTimer();
+      // Prevent infinite recursion by returning empty results
+      logger.warn('HybridSearch', 'Returning empty results to prevent infinite loop');
+      return [];
     }
   }
 
   async agenticRetrieve(options: AdvancedHybridQueryOptions & { routingModel?: string }): Promise<SearchResult[]> {
-    console.error("[HybridSearch] Starting agenticRetrieve with query:", options.query);
+    logger.debug('HybridSearch', 'Starting agenticRetrieve', { query: options.query });
     const { query, routingModel = "demyagent-4b-i1:Q6_K" } = options;
+    
+    // Validate limit to prevent infinite loops
+    if (options.limit !== undefined && options.limit <= 0) {
+      logger.warn('HybridSearch', `Invalid limit value: ${options.limit} - must be positive. Defaulting to 10.`);
+      options.limit = 10;
+    }
+
+    const endTimer = perfMonitor.startTimer('agenticRetrieve');
 
     const systemPrompt = `You are a Routing Agent for an advanced Memory/RAG system.
 Your job is to analyze the user's query and decide which search strategy is the most appropriate.

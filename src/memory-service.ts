@@ -4,6 +4,8 @@ import { Entity, Observation, Relationship, SearchResult } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import * as fs from 'fs';
+import { logger } from './logger';
+import { perfMonitor } from './performance-monitor';
 
 export class MemoryService {
   private db: DatabaseService;

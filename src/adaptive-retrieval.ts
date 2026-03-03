@@ -400,6 +400,12 @@ export class AdaptiveGraphRetrieval {
    * Main adaptive retrieval method
    */
   async retrieve(query: string, limit: number = 10): Promise<RetrievalResult> {
+    // Validate limit to prevent errors
+    if (limit <= 0) {
+      console.error('[AdaptiveRetrieval] Invalid limit value:', limit, '- must be positive. Defaulting to 10.');
+      limit = 10;
+    }
+    
     // 1. Classify query complexity
     const complexity = this.classifyQueryComplexity(query);
     console.error(`[AdaptiveRetrieval] Query complexity: ${complexity}`);
@@ -423,6 +429,12 @@ export class AdaptiveGraphRetrieval {
   // ==================== Strategy Implementations ====================
 
   private async vectorSearch(embedding: number[], limit: number): Promise<any[]> {
+    // Validate limit
+    if (limit <= 0) {
+      console.error('[AdaptiveRetrieval] Invalid limit in vectorSearch:', limit);
+      return [];
+    }
+    
     const result = await this.db.run(`
       ?[id, name, type, score] :=
         ~entity:semantic{id | query: vec($embedding), k: $limit, ef: 100, bind_distance: dist},

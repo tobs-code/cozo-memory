@@ -5,6 +5,38 @@ All notable changes to CozoDB Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] - 2026-03-03
+
+### Added
+- **Centralized Logging System**: Configurable log levels (ERROR, WARN, INFO, DEBUG, TRACE) via `LOG_LEVEL` environment variable
+- **Performance Monitoring**: Built-in performance tracking with percentile metrics (P50, P95, P99)
+- `logger.ts` - Centralized logging with component-based prefixes
+- `performance-monitor.ts` - Operation latency tracking and throughput measurement
+- `test-large-dataset.ts` - Comprehensive performance testing with small/medium/large dataset configurations
+- Performance metrics for all major operations (create_entity, add_observation, search, etc.)
+- Documentation: `docs/LOGGING.md` and `docs/PERFORMANCE.md`
+
+### Fixed
+- **CRITICAL: Infinite Loop Bug**: Fixed crash caused by `limit: 0` parameter triggering recursive search calls
+  - Added validation in `advancedSearch()`, `graphRag()`, `agenticRetrieve()` to prevent `limit <= 0`
+  - Replaced recursive fallback calls with empty array returns to prevent infinite loops
+  - Added validation in `dynamic-fusion.ts` for `topK` parameters
+  - Added validation in `adaptive-retrieval.ts` for `limit` and `vectorSearch()`
+- Improved error handling across all search strategies
+- Prevented self-reference relationships with proper validation
+
+### Changed
+- Replaced `console.error` with structured `logger` calls throughout codebase
+- Reduced debug output noise in production (use `LOG_LEVEL=DEBUG` for detailed logs)
+- Added performance timing to all major operations
+- Improved error messages with component context
+
+### Performance
+- Added throughput metrics (operations per second)
+- Added latency percentiles (P50, P95, P99) for all operations
+- Performance test configurations: small (100 entities), medium (500 entities), large (2000 entities)
+- Expected throughput: 5-10 ops/sec for mixed workloads
+
 ## [2.14.0] - 2026-03-03
 
 ### Added
