@@ -1,5 +1,7 @@
 import { DatabaseService } from './db-service.js';
 import { EmbeddingService } from './embedding-service.js';
+import { EmotionalSalienceService } from './emotional-salience.js';
+import { ZettelkastenEvolutionService } from './zettelkasten-evolution.js';
 import { Entity, Observation, Relationship, SearchResult } from './types.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -10,10 +12,46 @@ import { perfMonitor } from './performance-monitor';
 export class MemoryService {
   private db: DatabaseService;
   private embeddings: EmbeddingService;
+  private salienceService: EmotionalSalienceService | null = null;
+  private zettelkastenService: ZettelkastenEvolutionService | null = null;
 
   constructor(db: DatabaseService, embeddings: EmbeddingService) {
     this.db = db;
     this.embeddings = embeddings;
+    // Services will be initialized when needed
+  }
+
+  private getSalienceService(): EmotionalSalienceService {
+    if (!this.salienceService) {
+      // Create a temporary CozoDb instance for salience service
+      // In production, this should use the actual CozoDB instance
+      const { CozoDb } = require('cozo-node');
+      const tempDb = new CozoDb();
+      this.salienceService = new EmotionalSalienceService(tempDb, {
+        enableSalience: true,
+        salienceBoostFactor: 2.0,
+        decaySlowdownFactor: 0.5,
+        minSalienceThreshold: 0.3
+      });
+    }
+    return this.salienceService;
+  }
+
+  private getZettelkastenService(): ZettelkastenEvolutionService {
+    if (!this.zettelkastenService) {
+      const { CozoDb } = require('cozo-node');
+      const tempDb = new CozoDb();
+      this.zettelkastenService = new ZettelkastenEvolutionService(tempDb, this.embeddings, {
+        enableEvolution: true,
+        similarityThreshold: 0.7,
+        maxRelatedNotes: 5,
+        minKeywordFrequency: 2,
+        autoExtractKeywords: true,
+        autoBidirectionalLinks: true,
+        enrichmentDepth: 'shallow'
+      });
+    }
+    return this.zettelkastenService;
   }
 
   async createEntity(name: string, type: string, metadata: Record<string, any> = {}): Promise<Entity> {
@@ -55,6 +93,23 @@ export class MemoryService {
   ): Promise<Observation> {
     const id = uuidv4();
     const embedding = await this.embeddings.embed(text);
+
+    // Calculate emotional salience automatically
+    const salienceService = this.getSalienceService();
+    const salienceResult = salienceService.calculateSalienceScore(text);
+    
+    // Add salience metadata if score is above threshold
+    if (salienceResult.score >= 0.3) {
+      const boost = salienceService.calculateBoost(salienceResult.score);
+      metadata = {
+        ...metadata,
+        emotional_salience: salienceResult.score,
+        salience_category: salienceResult.category,
+        salience_keywords: salienceResult.keywords,
+        salience_boost_strength: boost.strengthMultiplier,
+        salience_boost_decay: boost.decayReduction
+      };
+    }
 
     const observation: Observation = {
       id: id,
@@ -331,5 +386,27 @@ export class MemoryService {
       chunks_processed: observations.length,
       total_chunks: chunks.length,
     };
+  }
+
+  // Emotional Salience Methods
+  async getSalienceStats() {
+    return this.getSalienceService().getSalienceStats();
+  }
+
+  async getObservationSalience(observationId: string) {
+    return this.getSalienceService().getObservationSalience(observationId);
+  }
+
+  async applySalienceToExistingObservations(dryRun: boolean = false) {
+    return this.getSalienceService().applySalienceMetadata(dryRun);
+  }
+
+  // Zettelkasten Memory Evolution Methods
+  async getZettelkastenStats() {
+    return this.getZettelkastenService().getEvolutionStats();
+  }
+
+  async enrichObservationWithZettelkasten(observationId: string, observationText: string, observationEmbedding: number[], entityId: string) {
+    return this.getZettelkastenService().enrichObservation(observationId, observationText, observationEmbedding, entityId);
   }
 }

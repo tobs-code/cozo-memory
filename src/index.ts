@@ -12,6 +12,12 @@ import { HybridSearch } from "./hybrid-search";
 import { InferenceEngine } from "./inference-engine";
 import { DynamicFusionSearch, FusionConfig, DEFAULT_FUSION_CONFIG } from "./dynamic-fusion";
 import { AdaptiveGraphRetrieval } from "./adaptive-retrieval";
+import { ZettelkastenEvolutionService } from "./zettelkasten-evolution";
+import { MemoryActivationService } from "./memory-activation";
+import { EmotionalSalienceService } from "./emotional-salience";
+import { ProactiveSuggestionsService } from "./proactive-suggestions";
+import { SpreadingActivationService } from "./spreading-activation";
+import { TemporalConflictResolutionService } from "./temporal-conflict-resolution";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
 const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
@@ -30,6 +36,15 @@ export class MemoryServer {
   public inferenceEngine: InferenceEngine;
   public initPromise: Promise<void>;
   private compactionLocks: Set<string> = new Set();
+  private zettelkastenService: ZettelkastenEvolutionService | null = null;
+  private activationService: MemoryActivationService | null = null;
+  private salienceService: EmotionalSalienceService | null = null;
+  private suggestionsService: ProactiveSuggestionsService | null = null;
+  private spreadingService: SpreadingActivationService | null = null;
+  private conflictService: TemporalConflictResolutionService | null = null;
+  private logicalEdgesService: any = null;
+  private hierarchicalMemoryService: any = null;
+  private queryAwareTraversal: any = null;
 
   // Metrics tracking
   private metrics = {
@@ -97,6 +112,157 @@ export class MemoryServer {
       console.error("[Server] Schema setup fully completed.");
     })();
     this.registerTools();
+  }
+
+  public getZettelkastenService(): ZettelkastenEvolutionService {
+    if (!this.zettelkastenService) {
+      this.zettelkastenService = new ZettelkastenEvolutionService(this.db, this.embeddingService, {
+        enableEvolution: true,
+        similarityThreshold: 0.7,
+        maxRelatedNotes: 5,
+        minKeywordFrequency: 2,
+        autoExtractKeywords: true,
+        autoBidirectionalLinks: true,
+        enrichmentDepth: 'shallow'
+      });
+    }
+    return this.zettelkastenService;
+  }
+
+  public getActivationService(): MemoryActivationService {
+    if (!this.activationService) {
+      this.activationService = new MemoryActivationService(this.db, {
+        initialStrength: 1.0,
+        strengthIncrement: 1.0,
+        maxStrength: 20.0,
+        retentionThreshold: 0.15,
+        decayBase: Math.E,
+        timeUnit: 'days'
+      });
+    }
+    return this.activationService;
+  }
+
+  public getSalienceService(): EmotionalSalienceService {
+    if (!this.salienceService) {
+      this.salienceService = new EmotionalSalienceService(this.db, {
+        enableSalience: true,
+        salienceBoostFactor: 2.0,
+        decaySlowdownFactor: 0.5,
+        minSalienceThreshold: 0.3
+      });
+    }
+    return this.salienceService;
+  }
+
+  public getSuggestionsService(): ProactiveSuggestionsService {
+    if (!this.suggestionsService) {
+      // Create a minimal DatabaseService wrapper for ProactiveSuggestionsService
+      const dbWrapper = {
+        getEntity: async (id: string) => {
+          const res = await this.db.run('?[name, type, embedding] := *entity{id: $id, name, type, embedding, @ "NOW"}', { id });
+          if (res.rows.length === 0) return null;
+          return {
+            id,
+            name: res.rows[0][0],
+            type: res.rows[0][1],
+            embedding: res.rows[0][2],
+          };
+        },
+        getRelations: async (fromId?: string, toId?: string) => {
+          let query = '?[from_id, to_id, relation_type, strength] := *relationship{from_id, to_id, relation_type, strength, @ "NOW"}';
+          const params: any = {};
+          
+          if (fromId) {
+            query += ', from_id = $from_id';
+            params.from_id = fromId;
+          }
+          if (toId) {
+            query += ', to_id = $to_id';
+            params.to_id = toId;
+          }
+          
+          const res = await this.db.run(query, params);
+          return res.rows.map((r: any) => ({
+            from_id: r[0],
+            to_id: r[1],
+            relation_type: r[2],
+            strength: r[3],
+          }));
+        },
+        vectorSearchEntity: async (embedding: number[], limit: number) => {
+          const res = await this.db.run(
+            `?[id, name, type, dist] := ~entity:embedding_index{embedding: $embedding | query: $limit, ef: 100, bind_distance: dist}, *entity{id, name, type, @ "NOW"}`,
+            { embedding, limit }
+          );
+          return res.rows;
+        },
+      } as any;
+
+      this.suggestionsService = new ProactiveSuggestionsService(dbWrapper, this.embeddingService, {
+        maxSuggestions: 10,
+        minConfidence: 0.5,
+        enableVectorSimilarity: true,
+        enableCommonNeighbors: true,
+        enableInference: true,
+        enableGraphProximity: true
+      });
+    }
+    return this.suggestionsService;
+  }
+
+  public getSpreadingService(): SpreadingActivationService {
+    if (!this.spreadingService) {
+      this.spreadingService = new SpreadingActivationService(this.db, this.embeddingService, {
+        spreadingFactor: 0.8,
+        decayFactor: 0.5,
+        temporalDecay: 0.01,
+        inhibitionBeta: 0.15,
+        inhibitionTopM: 7,
+        propagationSteps: 3,
+        activationThreshold: 0.01,
+        sigmoidGamma: 5.0,
+        sigmoidTheta: 0.5
+      });
+    }
+    return this.spreadingService;
+  }
+
+  public getConflictService(): TemporalConflictResolutionService {
+    if (!this.conflictService) {
+      this.conflictService = new TemporalConflictResolutionService(this.db, this.embeddingService, {
+        similarityThreshold: 0.85,
+        contradictionThreshold: 0.3,
+        timeWindowDays: 365,
+        autoResolve: false,
+        preserveAuditTrail: true
+      });
+    }
+    return this.conflictService;
+  }
+
+  public getLogicalEdgesService(): any {
+    if (!this.logicalEdgesService) {
+      const { LogicalEdgesService } = require('./logical-edges-service');
+      this.logicalEdgesService = new LogicalEdgesService(this.db);
+    }
+    return this.logicalEdgesService;
+  }
+
+  public getHierarchicalMemoryService(): any {
+    if (!this.hierarchicalMemoryService) {
+      const { HierarchicalMemoryService } = require('./hierarchical-memory');
+      this.hierarchicalMemoryService = new HierarchicalMemoryService(this.db, this.embeddingService);
+    }
+    return this.hierarchicalMemoryService;
+  }
+
+  public getQueryAwareTraversal(): any {
+    if (!this.queryAwareTraversal) {
+      const { QueryAwareTraversal } = require('./query-aware-traversal');
+      this.queryAwareTraversal = new QueryAwareTraversal(this.db, this.embeddingService);
+    }
+    return this.queryAwareTraversal;
   }
 
   public async janitorCleanup(args: {
@@ -3649,11 +3815,33 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
         action: z.literal("stop_task"),
         id: z.string().describe("ID of the task to stop"),
       }).passthrough(),
+      z.object({
+        action: z.literal("enrich_observation"),
+        observation_id: z.string().describe("ID of the observation to enrich with Zettelkasten metadata"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("record_memory_access"),
+        observation_id: z.string().describe("ID of the observation to record access for (ACT-R)"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("prune_weak_memories"),
+        dry_run: z.boolean().optional().default(true).describe("If true, only shows candidates without deleting"),
+        entity_id: z.string().optional().describe("Optional: Only prune memories for specific entity"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("detect_conflicts"),
+        entity_id: z.string().describe("Entity ID to detect conflicts for"),
+      }),
+      z.object({
+        action: z.literal("resolve_conflicts"),
+        entity_id: z.string().describe("Entity ID to resolve conflicts for"),
+        auto_resolve: z.boolean().optional().default(false).describe("Automatically resolve all conflicts"),
+      }),
     ]);
 
     const MutateMemoryParameters = z.object({
       action: z
-        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task", "invalidate_observation", "invalidate_relation"])
+        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task", "invalidate_observation", "invalidate_relation", "enrich_observation", "record_memory_access", "prune_weak_memories", "detect_conflicts", "resolve_conflicts"])
         .describe("Action (determines which fields are required)"),
       name: z.string().optional().describe("For create_entity (required) or add_inference_rule (required)"),
       type: z.string().optional().describe("For create_entity (required)"),
@@ -3675,7 +3863,8 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
       relation_type: z.string().optional().describe("For create_relation (required)"),
       strength: z.number().min(0).max(1).optional().describe("Optional for create_relation"),
       metadata: MetadataSchema.optional().describe("Optional for create_entity/update_entity/add_observation/create_relation/ingest_file"),
-      observation_id: z.string().optional().describe("For invalidate_observation (required)"),
+      observation_id: z.string().optional().describe("For invalidate_observation (required) or enrich_observation (required) or record_memory_access (required)"),
+      dry_run: z.boolean().optional().describe("For prune_weak_memories: if true, only shows candidates"),
       operations: z.array(z.object({
         action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity"]),
         params: z.any().describe("Parameters for the operation as an object")
@@ -3709,6 +3898,11 @@ Supported actions:
 - 'stop_task': Marks a task as completed. Params: { id: string }.
 - 'invalidate_observation': Invalidates (soft-deletes) an observation at the current time. Params: { observation_id: string }.
 - 'invalidate_relation': Invalidates (soft-deletes) a relationship at the current time. Params: { from_id: string, to_id: string, relation_type: string }.
+- 'enrich_observation': Manually trigger Zettelkasten enrichment for an observation. Params: { observation_id: string }. Extracts keywords/tags, finds related observations, creates bidirectional links, and updates metadata.
+- 'record_memory_access': Record access to an observation for ACT-R memory activation tracking. Params: { observation_id: string }. Updates access_count and last_access_time metadata.
+- 'prune_weak_memories': Delete observations with activation below retention threshold. Params: { dry_run?: boolean (default: true), entity_id?: string }. Returns: { pruned: number, preserved: number, candidates: ActivationScore[] }.
+- 'detect_conflicts': Detect temporal conflicts for an entity. Params: { entity_id: string }. Returns: { conflicts: [{ older_observation_id, newer_observation_id, conflict_type, confidence, reason }], count }. Detects redundancy, contradictions, and superseded facts.
+- 'resolve_conflicts': Resolve temporal conflicts by invalidating older observations. Params: { entity_id: string, auto_resolve?: boolean }. Returns: { resolved_conflicts, invalidated_observations, audit_observations }. Creates audit trail if enabled.
 
 Validation: Invalid syntax or missing columns in inference rules will result in errors.`,
       parameters: MutateMemoryParameters,
@@ -3746,6 +3940,136 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         if (action === "stop_session") return JSON.stringify(await this.stopSession(rest));
         if (action === "start_task") return JSON.stringify(await this.startTask(rest));
         if (action === "stop_task") return JSON.stringify(await this.stopTask(rest));
+        if (action === "enrich_observation") {
+          try {
+            console.log('[mutate_memory] Enriching observation:', rest.observation_id);
+            
+            // Get observation details
+            const obsRes = await this.db.run(
+              `?[obs_id, entity_id, text, embedding] := *observation{id: $id, entity_id, text, embedding, @ "NOW"}, obs_id = $id`,
+              { id: rest.observation_id }
+            );
+            
+            if (obsRes.rows.length === 0) {
+              return JSON.stringify({ error: "Observation not found" });
+            }
+            
+            const [obs_id, entity_id, text, embedding] = obsRes.rows[0];
+            
+            // Enrich the observation
+            const result = await this.getZettelkastenService().enrichObservation(
+              obs_id as string,
+              text as string,
+              embedding as number[],
+              entity_id as string
+            );
+            
+            console.log('[mutate_memory] Observation enriched:', {
+              observation_id: obs_id,
+              keywords: result.extractedKeywords?.length || 0,
+              tags: result.addedTags?.length || 0,
+              links: result.createdLinks || 0
+            });
+            
+            return JSON.stringify(result);
+          } catch (error: any) {
+            console.error('[mutate_memory] Error enriching observation:', error);
+            return JSON.stringify({ 
+              error: "Failed to enrich observation", 
+              details: error.message 
+            });
+          }
+        }
+        if (action === "record_memory_access") {
+          try {
+            console.log('[mutate_memory] Recording memory access:', rest.observation_id);
+            await this.getActivationService().recordAccess(rest.observation_id);
+            console.log('[mutate_memory] Memory access recorded successfully');
+            return JSON.stringify({ 
+              success: true, 
+              observation_id: rest.observation_id,
+              message: "Access recorded successfully"
+            });
+          } catch (error: any) {
+            console.error('[mutate_memory] Error recording memory access:', error);
+            return JSON.stringify({ 
+              error: "Failed to record memory access", 
+              details: error.message 
+            });
+          }
+        }
+        if (action === "prune_weak_memories") {
+          try {
+            const dryRun = rest.dry_run !== false; // Default to true
+            console.log('[mutate_memory] Pruning weak memories:', {
+              dry_run: dryRun,
+              entity_id: rest.entity_id || 'all'
+            });
+            
+            const result = await this.getActivationService().pruneWeakMemories(dryRun, rest.entity_id);
+            
+            console.log('[mutate_memory] Prune completed:', {
+              pruned: result.pruned,
+              preserved: result.preserved,
+              candidates: result.candidates.length
+            });
+            
+            return JSON.stringify(result);
+          } catch (error: any) {
+            console.error('[mutate_memory] Error pruning weak memories:', error);
+            return JSON.stringify({ 
+              error: "Failed to prune weak memories", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (action === "detect_conflicts") {
+          try {
+            console.log('[mutate_memory] Detecting conflicts for entity:', rest.entity_id);
+            const conflicts = await this.getConflictService().detectConflicts(rest.entity_id);
+            
+            console.log('[mutate_memory] Conflict detection completed:', {
+              entity_id: rest.entity_id,
+              conflicts_found: conflicts.length
+            });
+            
+            return JSON.stringify({
+              entity_id: rest.entity_id,
+              conflicts,
+              count: conflicts.length
+            });
+          } catch (error: any) {
+            console.error('[mutate_memory] Error detecting conflicts:', error);
+            return JSON.stringify({ 
+              error: "Failed to detect conflicts", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (action === "resolve_conflicts") {
+          try {
+            console.log('[mutate_memory] Resolving conflicts for entity:', rest.entity_id);
+            const result = await this.getConflictService().resolveConflicts(rest.entity_id);
+            
+            console.log('[mutate_memory] Conflict resolution completed:', {
+              entity_id: rest.entity_id,
+              resolved: result.resolved_conflicts,
+              invalidated: result.invalidated_observations.length,
+              audit_trail: result.audit_observations.length
+            });
+            
+            return JSON.stringify(result);
+          } catch (error: any) {
+            console.error('[mutate_memory] Error resolving conflicts:', error);
+            return JSON.stringify({ 
+              error: "Failed to resolve conflicts", 
+              details: error.message 
+            });
+          }
+        }
+
         return JSON.stringify({ error: "Unknown action" });
       },
     });
@@ -3871,11 +4195,49 @@ Validation: Invalid syntax or missing columns in inference rules will result in 
         query: z.string().describe("Search query for adaptive retrieval"),
         limit: z.number().optional().default(10).describe("Maximum number of results"),
       }),
+      z.object({
+        action: z.literal("get_zettelkasten_stats"),
+      }),
+      z.object({
+        action: z.literal("get_activation_stats"),
+        entity_id: z.string().optional().describe("Optional: Filter by entity ID"),
+      }),
+      z.object({
+        action: z.literal("get_salience_stats"),
+      }),
+      z.object({
+        action: z.literal("suggest_connections"),
+        entity_id: z.string().describe("Entity ID to suggest connections for"),
+        max_suggestions: z.number().optional().default(10).describe("Maximum number of suggestions"),
+        min_confidence: z.number().min(0).max(1).optional().default(0.5).describe("Minimum confidence threshold"),
+      }),
+      z.object({
+        action: z.literal("spreading_activation"),
+        query: z.string().describe("Search query for spreading activation"),
+        seed_top_k: z.number().optional().default(5).describe("Number of seed nodes to start from"),
+        limit: z.number().optional().default(30).describe("Maximum number of results"),
+      }),
+      z.object({
+        action: z.literal("qafd_search"),
+        query: z.string().describe("Search query for QAFD (Query-Aware Flow Diffusion)"),
+        seed_top_k: z.number().optional().default(5).describe("Number of vector seeds"),
+        max_hops: z.number().min(1).max(3).optional().default(2).describe("Maximum traversal depth"),
+        damping_factor: z.number().min(0).max(1).optional().default(0.85).describe("Flow diffusion damping factor"),
+        min_score: z.number().min(0).max(1).optional().default(0.05).describe("Minimum relevance threshold"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
+      }),
+      z.object({
+        action: z.literal("hierarchical_memory_query"),
+        query: z.string().describe("Search query for hierarchical memory"),
+        entity_id: z.string().optional().describe("Optional: Filter by entity ID"),
+        levels: z.array(z.number().min(0).max(3)).optional().describe("Memory levels to query (0-3)"),
+        limit: z.number().optional().default(10).describe("Maximum number of results"),
+      }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query"])
         .describe("Action (determines which fields are required)"),
       query: z.string().optional().describe("Required for search/advancedSearch/context/graph_rag/graph_walking/agentic_search/dynamic_fusion/adaptive_retrieval"),
       limit: z.number().optional().describe("Only for search/advancedSearch/graph_rag/graph_walking/dynamic_fusion/adaptive_retrieval"),
@@ -3913,6 +4275,11 @@ Supported actions:
 - 'agentic_search': Auto-Routing Search. Uses local LLM to analyze intent and routes the query automatically to the best strategy (Vector, Graph, or Community Summaries). Params: { query: string, limit?: number }.
 - 'adaptive_retrieval': GraphRAG-R1 inspired adaptive retrieval with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring. Automatically selects optimal strategy based on query complexity and historical performance. Params: { query: string, limit?: number }.
 - 'dynamic_fusion': Advanced multi-path fusion search combining Vector (HNSW), Sparse (keyword), FTS (full-text), and Graph traversal with configurable weights and strategies. Params: { query: string, config?: { vector?, sparse?, fts?, graph?, fusion? }, limit?: number }. Each path can be enabled/disabled and weighted independently. Fusion strategies: 'rrf' (Reciprocal Rank Fusion), 'weighted_sum', 'max', 'adaptive'. Returns results with path contribution details and performance stats.
+- 'get_zettelkasten_stats': Get Zettelkasten Memory Evolution statistics. No params required. Returns: { totalObservations, enrichedObservations, totalLinks, averageLinksPerNote, topKeywords, topTags, connectionTypes }.
+- 'get_activation_stats': Get ACT-R Memory Activation statistics. Params: { entity_id?: string }. Returns: { totalObservations, averageActivation, averageStrength, belowThreshold, aboveThreshold, distribution }.
+- 'get_salience_stats': Get Emotional Salience statistics. No params required. Returns: { totalObservations, withSalience, distribution, averageSalience, topKeywords }.
+- 'suggest_connections': Proactive connection suggestions for an entity. Params: { entity_id: string, max_suggestions?: number, min_confidence?: number }. Returns: { entity_id, suggestions: [{ entity_id, entity_name, entity_type, source, confidence, confidence_level, reason, metadata }], count }. Combines vector similarity, common neighbors, graph proximity, and inference strategies.
+- 'spreading_activation': SYNAPSE spreading activation search. Params: { query: string, seed_top_k?: number, limit?: number }. Returns: { scores: [{ entityId, activation, potential, source, hops }], iterations, converged, seedNodes }. Implements neural-inspired activation spreading with fan effect, lateral inhibition, and sigmoid activation.
 
 Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_fusion' provides the most control and transparency over retrieval paths. 'agentic_search' is the most adaptive. 'context' is ideal for exploratory questions. 'search' and 'advancedSearch' are better for targeted fact retrieval.`,
       parameters: QueryMemoryParameters,
@@ -4230,6 +4597,237 @@ Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_
           }
         }
 
+        if (input.action === "get_zettelkasten_stats") {
+          try {
+            console.log('[query_memory] Getting Zettelkasten stats');
+            const stats = await this.getZettelkastenService().getEvolutionStats();
+            console.log('[query_memory] Zettelkasten stats retrieved:', {
+              totalObservations: stats.totalObservations,
+              enrichedObservations: stats.enrichedObservations,
+              totalLinks: stats.totalLinks,
+              averageLinksPerNote: stats.averageLinksPerNote.toFixed(2)
+            });
+            return JSON.stringify(stats);
+          } catch (error: any) {
+            console.error('[query_memory] Error getting Zettelkasten stats:', error);
+            return JSON.stringify({ 
+              error: "Failed to get Zettelkasten stats", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "get_activation_stats") {
+          try {
+            console.log('[query_memory] Getting ACT-R activation stats', input.entity_id ? `for entity ${input.entity_id}` : '(all entities)');
+            const stats = await this.getActivationService().getActivationStats(input.entity_id);
+            console.log('[query_memory] Activation stats retrieved:', {
+              totalObservations: stats.totalObservations,
+              averageActivation: stats.averageActivation.toFixed(3),
+              belowThreshold: stats.belowThreshold,
+              aboveThreshold: stats.aboveThreshold
+            });
+            return JSON.stringify(stats);
+          } catch (error: any) {
+            console.error('[query_memory] Error getting activation stats:', error);
+            return JSON.stringify({ 
+              error: "Failed to get activation stats", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "get_salience_stats") {
+          try {
+            console.log('[query_memory] Getting Emotional Salience stats');
+            const stats = await this.getSalienceService().getSalienceStats();
+            console.log('[query_memory] Salience stats retrieved:', {
+              totalObservations: stats.totalObservations,
+              withSalience: stats.withSalience,
+              averageSalience: stats.averageSalience.toFixed(3)
+            });
+            return JSON.stringify(stats);
+          } catch (error: any) {
+            console.error('[query_memory] Error getting salience stats:', error);
+            return JSON.stringify({ 
+              error: "Failed to get salience stats", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "suggest_connections") {
+          try {
+            console.log('[query_memory] Suggesting connections for entity:', input.entity_id);
+            const service = this.getSuggestionsService();
+            
+            // Update config if custom parameters provided
+            if (input.max_suggestions || input.min_confidence) {
+              service.updateConfig({
+                maxSuggestions: input.max_suggestions,
+                minConfidence: input.min_confidence
+              });
+            }
+            
+            const suggestions = await service.suggestConnections(input.entity_id);
+            console.log('[query_memory] Found', suggestions.length, 'connection suggestions');
+            return JSON.stringify({ 
+              entity_id: input.entity_id,
+              suggestions,
+              count: suggestions.length
+            });
+          } catch (error: any) {
+            console.error('[query_memory] Error suggesting connections:', error);
+            return JSON.stringify({ 
+              error: "Failed to suggest connections", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "spreading_activation") {
+          try {
+            console.log('[query_memory] Spreading activation search:', input.query);
+            const result = await this.getSpreadingService().spreadActivation(
+              input.query,
+              input.seed_top_k || 5
+            );
+            
+            // Limit results if requested
+            const limitedScores = input.limit 
+              ? result.scores.slice(0, input.limit)
+              : result.scores;
+            
+            console.log('[query_memory] Spreading activation completed:', {
+              totalScores: result.scores.length,
+              returned: limitedScores.length,
+              iterations: result.iterations,
+              converged: result.converged
+            });
+            
+            return JSON.stringify({
+              scores: limitedScores,
+              iterations: result.iterations,
+              converged: result.converged,
+              seedNodes: result.seedNodes,
+              totalResults: result.scores.length
+            });
+          } catch (error: any) {
+            console.error('[query_memory] Error in spreading activation:', error);
+            return JSON.stringify({ 
+              error: "Failed to perform spreading activation", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "qafd_search") {
+          try {
+            console.log('[query_memory] QAFD search:', input.query);
+            const result = await this.getQueryAwareTraversal().hybridSearch(
+              input.query,
+              {
+                seedTopK: input.seed_top_k || 5,
+                maxHops: input.max_hops || 2,
+                dampingFactor: input.damping_factor || 0.85,
+                minScore: input.min_score || 0.05,
+                topK: input.limit || 10
+              }
+            );
+            
+            console.log('[query_memory] QAFD search completed:', {
+              totalResults: result.length
+            });
+            
+            return JSON.stringify({
+              results: result,
+              count: result.length
+            });
+          } catch (error: any) {
+            console.error('[query_memory] Error in QAFD search:', error);
+            return JSON.stringify({ 
+              error: "Failed to perform QAFD search", 
+              details: error.message 
+            });
+          }
+        }
+
+        if (input.action === "hierarchical_memory_query") {
+          try {
+            console.log('[query_memory] Hierarchical memory query:', input.query);
+            
+            // Build query filter for memory levels
+            let levelFilter = '';
+            if (input.levels && input.levels.length > 0) {
+              const levelConditions = input.levels.map((l: number) => `memory_level = ${l}`).join(' or ');
+              levelFilter = `, (${levelConditions})`;
+            }
+            
+            // Build entity filter
+            let entityFilter = '';
+            if (input.entity_id) {
+              entityFilter = `, entity_id = $entity_id`;
+            }
+            
+            // Query observations with level filtering
+            const queryEmbedding = await this.embeddingService.embed(input.query);
+            
+            const datalog = `
+              ?[id, entity_id, text, memory_level, dist] :=
+                ~observation:semantic{
+                  id | 
+                  query: vec($embedding), 
+                  k: $limit, 
+                  ef: 100, 
+                  bind_distance: dist
+                },
+                *observation{id, entity_id, text, metadata, @ "NOW"},
+                memory_level = get(metadata, "memory_level", 0)
+                ${levelFilter}
+                ${entityFilter}
+              
+              :order dist
+            `;
+            
+            const params: any = {
+              embedding: queryEmbedding,
+              limit: input.limit || 10
+            };
+            
+            if (input.entity_id) {
+              params.entity_id = input.entity_id;
+            }
+            
+            const result = await this.db.run(datalog, params);
+            
+            const observations = result.rows.map((r: any) => ({
+              id: r[0],
+              entity_id: r[1],
+              text: r[2],
+              memory_level: r[3],
+              distance: r[4]
+            }));
+            
+            console.log('[query_memory] Hierarchical memory query completed:', {
+              totalResults: observations.length
+            });
+            
+            return JSON.stringify({
+              results: observations,
+              count: observations.length,
+              query: input.query,
+              levels: input.levels || [0, 1, 2, 3],
+              entity_id: input.entity_id
+            });
+          } catch (error: any) {
+            console.error('[query_memory] Error in hierarchical memory query:', error);
+            return JSON.stringify({ 
+              error: "Failed to perform hierarchical memory query", 
+              details: error.message 
+            });
+          }
+        }
+
         if (input.action === "graph_rag") {
           if (!input.query || input.query.trim().length === 0) {
             return JSON.stringify({ error: "Search query must not be empty." });
@@ -4417,13 +5015,13 @@ Notes: 'adaptive_retrieval' learns from usage and optimizes over time. 'dynamic_
 
     const AnalyzeGraphParameters = z.object({
       action: z
-        .enum(["explore", "communities", "pagerank", "betweenness", "hits", "connected_components", "shortest_path", "bridge_discovery", "infer_relations", "get_relation_evolution", "semantic_walk", "hnsw_clusters"])
+        .enum(["explore", "communities", "pagerank", "betweenness", "hits", "connected_components", "shortest_path", "bridge_discovery", "infer_relations", "get_relation_evolution", "semantic_walk", "hnsw_clusters", "discover_logical_edges", "materialize_logical_edges", "detect_temporal_patterns"])
         .describe("Action (determines which fields are required)"),
       start_entity: z.string().optional().describe("Required for explore/shortest_path/semantic_walk (Start entity ID)"),
       end_entity: z.string().optional().describe("Optional for explore / required for shortest_path"),
       max_hops: z.number().optional().describe("Optional for explore"),
       relation_types: z.array(z.string()).optional().describe("Optional for explore"),
-      entity_id: z.string().optional().describe("Required for infer_relations"),
+      entity_id: z.string().optional().describe("Required for infer_relations/discover_logical_edges/materialize_logical_edges/detect_temporal_patterns"),
       from_id: z.string().optional().describe("Required for get_relation_evolution"),
       to_id: z.string().optional().describe("Optional for get_relation_evolution"),
       max_depth: z.number().optional().describe("Optional for semantic_walk"),
@@ -4447,7 +5045,10 @@ Supported actions:
 - 'infer_relations': Starts the inference engine for an entity. Params: { entity_id: string }.
 - 'get_relation_evolution': Tracks the temporal evolution of relationships. Params: { from_id: string, to_id?: string }.
 - 'semantic_walk': Performs a recursive "Graph Walk" that follows both explicit relationships and semantic similarity. Params: { start_entity: string, max_depth?: number, min_similarity?: number }.
-- 'hnsw_clusters': Analyzes clusters directly on the HNSW graph (Layer 0). Extremely fast as no vector calculations are needed.`,
+- 'hnsw_clusters': Analyzes clusters directly on the HNSW graph (Layer 0). Extremely fast as no vector calculations are needed.
+- 'discover_logical_edges': Discovers implicit logical edges for an entity (same category, type, hierarchical, contextual, transitive). Params: { entity_id: string }.
+- 'materialize_logical_edges': Materializes discovered logical edges as actual relationships in the graph. Params: { entity_id: string }.
+- 'detect_temporal_patterns': Detects temporal patterns in entity observations (periodic, trending, seasonal). Params: { entity_id: string }.`,
       parameters: AnalyzeGraphParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -4713,6 +5314,106 @@ Supported actions:
           }
         }
 
+        if (input.action === "discover_logical_edges") {
+          try {
+            if (!input.entity_id) {
+              return JSON.stringify({ error: "entity_id is required for discover_logical_edges" });
+            }
+            const edges = await this.getLogicalEdgesService().discoverLogicalEdges(input.entity_id);
+            return JSON.stringify({ 
+              entity_id: input.entity_id, 
+              edge_count: edges.length, 
+              edges 
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error discovering logical edges" });
+          }
+        }
+
+        if (input.action === "materialize_logical_edges") {
+          try {
+            if (!input.entity_id) {
+              return JSON.stringify({ error: "entity_id is required for materialize_logical_edges" });
+            }
+            const count = await this.getLogicalEdgesService().materializeLogicalEdges(input.entity_id);
+            return JSON.stringify({ 
+              entity_id: input.entity_id, 
+              materialized_count: count,
+              status: `${count} logical edges materialized as relationships`
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error materializing logical edges" });
+          }
+        }
+
+        if (input.action === "detect_temporal_patterns") {
+          try {
+            if (!input.entity_id) {
+              return JSON.stringify({ error: "entity_id is required for detect_temporal_patterns" });
+            }
+            // Check if entity exists
+            const entityRes = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id: input.entity_id });
+            if (entityRes.rows.length === 0) {
+              return JSON.stringify({ error: `Entity with ID '${input.entity_id}' not found` });
+            }
+            
+            // Get observations for the entity
+            const obsRes = await this.db.run(`
+              ?[id, text, created_at] := 
+                *observation{id, entity_id, text, created_at, @ "NOW"},
+                entity_id = $entity_id
+            `, { entity_id: input.entity_id });
+            
+            if (obsRes.rows.length === 0) {
+              return JSON.stringify({ 
+                entity_id: input.entity_id, 
+                patterns: [],
+                message: "No observations found for temporal pattern detection"
+              });
+            }
+
+            // Simple temporal pattern detection
+            const observations = obsRes.rows.map((r: any) => ({
+              id: r[0],
+              text: r[1],
+              timestamp: r[2][0] / 1000 // Convert microseconds to milliseconds
+            }));
+
+            // Sort by timestamp
+            observations.sort((a: any, b: any) => a.timestamp - b.timestamp);
+
+            const patterns: any[] = [];
+
+            // Detect trending (increasing frequency over time)
+            if (observations.length >= 3) {
+              const timeSpan = observations[observations.length - 1].timestamp - observations[0].timestamp;
+              const avgInterval = timeSpan / (observations.length - 1);
+              
+              if (avgInterval < 7 * 24 * 60 * 60 * 1000) { // Less than a week
+                patterns.push({
+                  type: "trending",
+                  confidence: 0.8,
+                  description: "High frequency of observations detected",
+                  observation_count: observations.length,
+                  time_span_days: (timeSpan / (24 * 60 * 60 * 1000)).toFixed(1)
+                });
+              }
+            }
+
+            return JSON.stringify({ 
+              entity_id: input.entity_id, 
+              observation_count: observations.length,
+              patterns,
+              time_range: {
+                start: new Date(observations[0].timestamp).toISOString(),
+                end: new Date(observations[observations.length - 1].timestamp).toISOString()
+              }
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error detecting temporal patterns" });
+          }
+        }
+
         return JSON.stringify({ error: "Unknown action" });
       },
     });
@@ -4785,7 +5486,7 @@ Supported actions:
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact"])
+        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact", "compress_memory_levels", "analyze_memory_distribution"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -4807,9 +5508,10 @@ Supported actions:
       similarity_threshold: z.number().optional().describe("Optional for defrag (0.8-1.0, default 0.95)"),
       min_island_size: z.number().optional().describe("Optional for defrag (1-10, default 3)"),
       model: z.string().optional().describe("Optional for cleanup/reflect/summarize_communities"),
-      entity_id: z.string().optional().describe("Optional for reflect"),
+      entity_id: z.string().optional().describe("Optional for reflect, required for compress_memory_levels/analyze_memory_distribution"),
       min_community_size: z.number().optional().describe("Optional for summarize_communities"),
       mode: z.enum(["summary", "discovery"]).optional().describe("Optional for reflect"),
+      level: z.number().optional().describe("Required for compress_memory_levels (0-3: L0_RAW, L1_SESSION, L2_WEEKLY, L3_MONTHLY)"),
     });
 
     this.mcp.addTool({
@@ -4838,7 +5540,9 @@ Supported actions:
   * With confirm=true: Executes defragmentation and returns statistics.
 - 'reflect': Reflection service. Analyzes memory for contradictions and insights. Params: { entity_id?: string, model?: string }.
 - 'clear_memory': Resets the entire database. Params: { confirm: boolean (must be true) }.
-- 'summarize_communities': Hierarchical GraphRAG. Generates summaries for entity clusters. Params: { model?: string, min_community_size?: number }.`,
+- 'summarize_communities': Hierarchical GraphRAG. Generates summaries for entity clusters. Params: { model?: string, min_community_size?: number }.
+- 'compress_memory_levels': Hierarchical memory compression. Compresses observations at a specific memory level using LLM summarization. Params: { entity_id: string, level: number (0-3) }.
+- 'analyze_memory_distribution': Analyzes memory distribution across hierarchical levels. Params: { entity_id: string }.`,
       parameters: ManageSystemParameters,
       execute: async (args: any) => {
         await this.initPromise;
@@ -5129,6 +5833,67 @@ Supported actions:
             }
           } catch (error: any) {
             return JSON.stringify({ error: error.message || "Error during compaction" });
+          }
+        }
+
+        if (input.action === "compress_memory_levels") {
+          try {
+            if (!input.entity_id) {
+              return JSON.stringify({ error: "entity_id is required for compress_memory_levels" });
+            }
+            if (input.level === undefined || input.level === null) {
+              return JSON.stringify({ error: "level is required (0-3: L0_RAW, L1_SESSION, L2_WEEKLY, L3_MONTHLY)" });
+            }
+            if (input.level < 0 || input.level > 3) {
+              return JSON.stringify({ error: "level must be between 0 and 3" });
+            }
+
+            const result = await this.getHierarchicalMemoryService().compressMemoryLevel(input.entity_id, input.level);
+            
+            if (!result) {
+              return JSON.stringify({ 
+                entity_id: input.entity_id,
+                level: input.level,
+                status: "no_compression_needed",
+                message: "Not enough observations for compression at this level"
+              });
+            }
+
+            return JSON.stringify({
+              entity_id: input.entity_id,
+              level: result.level,
+              compressed_observations: result.compressed_observations,
+              summary_id: result.summary_id,
+              preserved_count: result.preserved_observations.length,
+              deleted_count: result.deleted_observations.length,
+              status: "compression_completed"
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error compressing memory levels" });
+          }
+        }
+
+        if (input.action === "analyze_memory_distribution") {
+          try {
+            if (!input.entity_id) {
+              return JSON.stringify({ error: "entity_id is required for analyze_memory_distribution" });
+            }
+
+            const stats = await this.getHierarchicalMemoryService().getMemoryStats(input.entity_id);
+            
+            return JSON.stringify({
+              entity_id: input.entity_id,
+              total_observations: stats.total_observations,
+              distribution: {
+                L0_RAW: stats.by_level[0] || 0,
+                L1_SESSION: stats.by_level[1] || 0,
+                L2_WEEKLY: stats.by_level[2] || 0,
+                L3_MONTHLY: stats.by_level[3] || 0
+              },
+              avg_importance: stats.avg_importance
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error analyzing memory distribution" });
           }
         }
 

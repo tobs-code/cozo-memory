@@ -383,20 +383,22 @@ export class TemporalConflictResolutionService {
   private async invalidateObservation(observationId: string): Promise<void> {
     // Delete the observation (query without @ "NOW" and filter manually)
     const datalog = `
-      ?[id, created_at, entity_id, text, embedding, metadata] := 
+      ?[id, created_at, entity_id, text, embedding, metadata, session_id, task_id] := 
         *observation{
           id,
           created_at,
           entity_id,
           text,
           embedding,
-          metadata
+          metadata,
+          session_id,
+          task_id
         },
         id = $id,
         to_bool(created_at)
       
       :delete observation {
-        id, created_at, entity_id, text, embedding, metadata
+        id, created_at, entity_id, text, embedding, metadata, session_id, task_id
       }
     `;
 
@@ -416,16 +418,18 @@ export class TemporalConflictResolutionService {
     const embedding = await this.embeddings.embed(auditText);
 
     const datalog = `
-      ?[id, created_at, entity_id, text, embedding, metadata] := 
+      ?[id, created_at, entity_id, text, embedding, metadata, session_id, task_id] := 
         id = $id,
         created_at = $created_at,
         entity_id = $entity_id,
         text = $text,
         embedding = $embedding,
-        metadata = $metadata
+        metadata = $metadata,
+        session_id = "",
+        task_id = ""
       
       :put observation {
-        id, created_at => entity_id, text, embedding, metadata
+        id, created_at => entity_id, text, embedding, metadata, session_id, task_id
       }
     `;
 

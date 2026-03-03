@@ -70,14 +70,18 @@ export class MemoryActivationService {
   /**
    * Calculate activation score for an observation
    * Formula: R = e^(-t/S)
+   * With emotional salience: decay rate is reduced by salienceBoostDecay
    */
   private calculateActivation(
     timeSinceAccess: number,
-    strength: number
+    strength: number,
+    salienceBoostDecay: number = 0.0
   ): number {
     if (timeSinceAccess === 0) return 1.0;
     
-    const exponent = -timeSinceAccess / strength;
+    // Apply salience decay reduction (slower decay for emotionally salient memories)
+    const effectiveTime = timeSinceAccess * (1.0 - salienceBoostDecay);
+    const exponent = -effectiveTime / strength;
     const activation = Math.pow(this.config.decayBase, exponent);
     
     return Math.max(0, Math.min(1, activation));
@@ -86,11 +90,16 @@ export class MemoryActivationService {
   /**
    * Get current memory strength for an observation
    * S = initialStrength + (accessCount * strengthIncrement)
+   * With emotional salience boost: S = S * salienceBoostStrength
    */
-  private calculateStrength(accessCount: number): number {
-    const strength = this.config.initialStrength + 
-                    (accessCount * this.config.strengthIncrement);
-    return Math.min(strength, this.config.maxStrength);
+  private calculateStrength(
+    accessCount: number, 
+    salienceBoostStrength: number = 1.0
+  ): number {
+    const baseStrength = this.config.initialStrength + 
+                        (accessCount * this.config.strengthIncrement);
+    const boostedStrength = baseStrength * salienceBoostStrength;
+    return Math.min(boostedStrength, this.config.maxStrength);
   }
 
   /**
@@ -118,12 +127,12 @@ export class MemoryActivationService {
       const query = entityId
         ? `
           ?[id, entity_id, text, metadata, created_at] := 
-            *observation{id, entity_id, text, metadata, created_at},
+            *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"},
             entity_id == $entity_id
         `
         : `
           ?[id, entity_id, text, metadata, created_at] := 
-            *observation{id, entity_id, text, metadata, created_at}
+            *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"}
         `;
 
       const result = await this.db.run(query, entityId ? { entity_id: entityId } : {});
@@ -136,16 +145,24 @@ export class MemoryActivationService {
         const accessCount = (metadata?.access_count || 0) as number;
         const lastAccessTime = (metadata?.last_access_time || created_at) as number;
 
-        // Calculate activation
+        // Extract emotional salience boosts (if present)
+        const salienceBoostStrength = (metadata?.salience_boost_strength || 1.0) as number;
+        const salienceBoostDecay = (metadata?.salience_boost_decay || 0.0) as number;
+        const salienceScore = (metadata?.emotional_salience || 0.0) as number;
+
+        // Calculate activation with salience boosts
         const timeSinceAccess = this.getTimeSinceAccess(lastAccessTime);
-        const strength = this.calculateStrength(accessCount);
-        const activation = this.calculateActivation(timeSinceAccess, strength);
+        const strength = this.calculateStrength(accessCount, salienceBoostStrength);
+        const activation = this.calculateActivation(timeSinceAccess, strength, salienceBoostDecay);
 
         // Determine retention
         const shouldRetain = activation >= this.config.retentionThreshold;
+        const salienceInfo = salienceScore > 0 
+          ? ` [Salience: ${salienceScore.toFixed(2)}, Boost: ×${salienceBoostStrength.toFixed(2)}]`
+          : '';
         const reason = shouldRetain
-          ? `Active memory (activation: ${activation.toFixed(3)}, strength: ${strength.toFixed(1)})`
-          : `Below threshold (activation: ${activation.toFixed(3)} < ${this.config.retentionThreshold})`;
+          ? `Active memory (activation: ${activation.toFixed(3)}, strength: ${strength.toFixed(1)})${salienceInfo}`
+          : `Below threshold (activation: ${activation.toFixed(3)} < ${this.config.retentionThreshold})${salienceInfo}`;
 
         scores.push({
           observationId: id as string,
@@ -173,8 +190,8 @@ export class MemoryActivationService {
     try {
       // Get current observation
       const result = await this.db.run(`
-        ?[id, entity_id, text, metadata, created_at] := 
-          *observation{id, entity_id, text, metadata, created_at},
+        ?[id, entity_id, session_id, task_id, text, metadata, created_at] := 
+          *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"},
           id == $id
       `, { id: observationId });
 
@@ -183,7 +200,7 @@ export class MemoryActivationService {
         return;
       }
 
-      const [id, entity_id, text, metadata, created_at] = result.rows[0];
+      const [id, entity_id, session_id, task_id, text, metadata, created_at] = result.rows[0];
       const currentMetadata = (metadata || {}) as Record<string, any>;
 
       // Update access metadata
@@ -196,16 +213,31 @@ export class MemoryActivationService {
         last_access_time: lastAccessTime,
       };
 
+      // Get embedding (we need it for the update)
+      const embResult = await this.db.run(`
+        ?[embedding] := *observation{id: $id, embedding, @ "NOW"}
+      `, { id: observationId });
+      
+      if (embResult.rows.length === 0) {
+        console.warn(`[MemoryActivation] Could not get embedding for observation ${observationId}`);
+        return;
+      }
+      
+      const embedding = embResult.rows[0][0];
+
       // Update observation with new metadata
       await this.db.run(`
-        ?[id, entity_id, text, metadata, created_at] <- [
-          [$id, $entity_id, $text, $metadata, $created_at]
+        ?[id, entity_id, session_id, task_id, text, embedding, metadata, created_at] <- [
+          [$id, $entity_id, $session_id, $task_id, $text, $embedding, $metadata, $created_at]
         ]
-        :put observation {id, entity_id, text => metadata, created_at}
+        :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
       `, {
         id,
         entity_id,
+        session_id,
+        task_id,
         text,
+        embedding,
         metadata: updatedMetadata,
         created_at
       });
@@ -238,12 +270,12 @@ export class MemoryActivationService {
       // Actually delete weak memories
       let pruned = 0;
       for (const candidate of candidates) {
-        // Delete the observation
+        // Delete the observation using :rm
         await this.db.run(`
-          ?[id, entity_id, text, metadata, created_at] := 
-            *observation{id, entity_id, text, metadata, created_at},
+          ?[id, entity_id, session_id, task_id, text, metadata, created_at] := 
+            *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"},
             id == $id
-          :rm observation {id, entity_id, text => metadata, created_at}
+          :rm observation {id, created_at => entity_id, session_id, task_id, text, metadata}
         `, { id: candidate.observationId });
         
         pruned++;
@@ -332,8 +364,8 @@ export class MemoryActivationService {
     try {
       // Get the observation
       const result = await this.db.run(`
-        ?[id, entity_id, text, metadata, created_at] := 
-          *observation{id, entity_id, text, metadata, created_at},
+        ?[id, entity_id, session_id, task_id, text, metadata, created_at] := 
+          *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"},
           id == $id
       `, { id: observationId });
       
@@ -346,14 +378,14 @@ export class MemoryActivationService {
 
       // Get all observations for the same entity (excluding the current one)
       const relatedResult = await this.db.run(`
-        ?[id, entity_id, text, metadata, created_at] := 
-          *observation{id, entity_id, text, metadata, created_at},
+        ?[id, entity_id, session_id, task_id, text, metadata, created_at] := 
+          *observation{id, entity_id, session_id, task_id, text, metadata, created_at, @ "NOW"},
           entity_id == $entity_id,
           id != $id
       `, { entity_id, id: observationId });
 
       let boosted = 0;
-      for (const [relId, relEntityId, relText, relMetadata, relCreatedAt] of relatedResult.rows) {
+      for (const [relId, relEntityId, relSessionId, relTaskId, relText, relMetadata, relCreatedAt] of relatedResult.rows) {
         const currentMetadata = (relMetadata || {}) as Record<string, any>;
         
         // Simulate a partial access (priming effect)
@@ -364,16 +396,27 @@ export class MemoryActivationService {
           access_count: accessCount,
         };
 
+        // Get embedding
+        const embResult = await this.db.run(`
+          ?[embedding] := *observation{id: $id, embedding, @ "NOW"}
+        `, { id: relId });
+        
+        if (embResult.rows.length === 0) continue;
+        const relEmbedding = embResult.rows[0][0];
+
         // Update the related observation
         await this.db.run(`
-          ?[id, entity_id, text, metadata, created_at] <- [
-            [$id, $entity_id, $text, $metadata, $created_at]
+          ?[id, entity_id, session_id, task_id, text, embedding, metadata, created_at] <- [
+            [$id, $entity_id, $session_id, $task_id, $text, $embedding, $metadata, $created_at]
           ]
-          :put observation {id, entity_id, text => metadata, created_at}
+          :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
         `, {
           id: relId,
           entity_id: relEntityId,
+          session_id: relSessionId,
+          task_id: relTaskId,
           text: relText,
+          embedding: relEmbedding,
           metadata: updatedMetadata,
           created_at: relCreatedAt
         });
