@@ -3,6 +3,7 @@
 [![npm](https://img.shields.io/npm/v/cozo-memory)](https://www.npmjs.com/package/cozo-memory)
 [![Node](https://img.shields.io/node/v/cozo-memory)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![MCP Badge](https://lobehub.com/badge/mcp-full/tobs-code-cozo-memory)](https://lobehub.com/mcp/tobs-code-cozo-memory)
 
 **Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – all in a single binary, no cloud, no Docker.**
 
