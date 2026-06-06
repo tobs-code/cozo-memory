@@ -51,6 +51,10 @@ Use `query_memory` with `action="context"`:
 | `spreading_activation` | Neural-inspired semantic exploration | query (required), seed_top_k, limit | - |
 | `suggest_connections` | Discover potential relationships | entity_id (required), max_suggestions | Does NOT require query parameter |
 | `hierarchical_memory_query` | Query across memory hierarchy levels | query (required), levels, entity_id, limit | Returns observations from L0-L3 levels |
+| `list_entities` | Browse/list entities (no search) | type, types, name_contains, tags, sort_by, sort_order, limit, offset | NO query; returns observation_count/relation_count |
+| `get_entity_detail` | Entity + observations + relations in one call | entity_id (required), include_observations, include_relations, include_community, include_timeline | One-shot aggregation |
+| `get_session_context` | Observations (+ entities/timeline) for a session | session_id?, include_observations, include_entities, include_timeline, limit | Defaults to most recently active session |
+| `list_sessions` | List sessions with activity metadata | active_only, limit | Includes observation_count |
 
 ## Mutate Memory Actions Reference
 
@@ -74,6 +78,14 @@ Use `query_memory` with `action="context"`:
 - `prune_weak_memories` - Delete low-activation observations
 - `detect_conflicts` - Find contradictory information (entity_id required)
 - `resolve_conflicts` - Auto-resolve temporal conflicts (entity_id required)
+
+### Agent Convenience Operations
+- `update_observation` - Edit an observation's text/metadata (observation_id required; `merge_metadata` to merge instead of replace; returns `previous_text`)
+- `batch_delete` - Delete many entities by `entity_ids` or `filter` (type, name_contains, created_before/after, metadata, tags); `dry_run` to preview
+- `manage_tags` - Lightweight tags in `metadata.tags`: `operation` add/remove/set/list/search (entity_id for add/remove/set, search_tag for search)
+- `batch` - Run a sequence of mutations; `transactional` (all-or-nothing, default true) or `continue_on_error` (best-effort)
+
+> **Sessions:** `add_observation` accepts `session_id`/`task_id` to link an observation to a session/task. Use the `id` returned by `start_session`. This is what makes `get_session_context`/`list_sessions` return data.
 
 ## Graph Analysis Actions Reference
 
@@ -101,6 +113,7 @@ Use `query_memory` with `action="context"`:
 |--------|---------|------------|
 | `health` | Status check with metrics | - |
 | `metrics` | Detailed performance data | - |
+| `stats` | Aggregate dashboard (overview, by_type, timeline) | - |
 | `export_memory` | Export to JSON/Markdown/Obsidian | format, filters |
 | `import_memory` | Import from Mem0/MemGPT/Markdown/Cozo | data, sourceFormat |
 | `snapshot_create` | Create backup point | metadata? |

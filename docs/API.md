@@ -35,6 +35,14 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 - `detect_conflicts`, `resolve_conflicts` - Conflict detection and resolution
 - `enrich_observation`, `record_memory_access`, `prune_weak_memories` - Memory management
 
+**Agent convenience actions:**
+- `update_observation` - Edit an existing observation's text/metadata
+- `batch_delete` - Delete many entities by IDs or filter (supports `dry_run`)
+- `manage_tags` - Lightweight tags in `metadata.tags` (add/remove/set/list/search)
+- `batch` - Run a sequence of mutations (transactional or best-effort)
+
+**Note:** `add_observation` also accepts `session_id`/`task_id` to link an observation to a session/task (used by `get_session_context`/`list_sessions`).
+
 **Note:** User profile observations (entity_id='global_user_profile') are automatically boosted in searches.
 
 ---
@@ -70,6 +78,12 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 **Statistics:**
 - `get_zettelkasten_stats`, `get_activation_stats`, `get_salience_stats` - No params required
 
+**Agent convenience actions:**
+- `list_entities` - Browse/list entities with filter, sort and pagination (NO query)
+- `get_entity_detail` - Entity + observations + relations (+ optional community/timeline) in one call (entity_id required)
+- `get_session_context` - A session's observations (+ optional entities/timeline); defaults to most recently active session
+- `list_sessions` - List sessions with activity metadata and observation counts
+
 ---
 
 ### analyze_graph - Graph Analysis
@@ -96,6 +110,9 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 **Monitoring:**
 - `health` - Status check with DB counts and performance metrics
 - `metrics` - Detailed operational statistics
+
+**Statistics:**
+- `stats` - Aggregate dashboard: overview counts, per-type breakdown, timeline (no params)
 
 **Data Portability:**
 - `export_memory` - Export to JSON/Markdown/Obsidian (format required)
@@ -336,6 +353,134 @@ When adding custom inference rules with `add_inference_rule`, the Datalog query 
   "older_than_days": 30
 }
 ```
+
+---
+
+## Agent Convenience Actions
+
+Higher-level actions that aggregate or batch lower-level operations so an agent
+needs fewer round-trips. All responses are JSON.
+
+### `query_memory` → `list_entities`
+
+Browse what is in memory without searching. No `query` needed.
+
+Parameters: `type?`, `types?: string[]`, `name_contains?` (case-insensitive),
+`tags?: string[]` (entity must have **all** tags), `sort_by?` (`name` |
+`created_at` | `updated_at`, default `created_at`), `sort_order?` (`asc` |
+`desc`, default `desc`), `limit?` (default 20, max 1000), `offset?` (default 0).
+
+```json
+{ "action": "list_entities", "type": "person", "tags": ["vip"], "sort_by": "name", "sort_order": "asc", "limit": 20 }
+```
+
+Response: `{ entities: [{ id, name, type, metadata, tags, created_at, observation_count, relation_count }], total, offset, limit }`
+
+### `query_memory` → `get_entity_detail`
+
+Everything about one entity in a single call.
+
+Parameters: `entity_id` (required), `include_observations?` (default true),
+`include_relations?` (default true), `include_community?` (default false),
+`include_timeline?` (default false).
+
+```json
+{ "action": "get_entity_detail", "entity_id": "ENTITY_ID", "include_timeline": true }
+```
+
+Response: `{ entity, observations[], relations: { outgoing[], incoming[] }, community?, timeline? }`
+
+### `query_memory` → `get_session_context` / `list_sessions`
+
+Inspect what happened in a session. `get_session_context` defaults to the most
+recently active session when `session_id` is omitted.
+
+`get_session_context` parameters: `session_id?`, `include_observations?` (default
+true), `include_entities?` (default false), `include_timeline?` (default false),
+`limit?` (default 50). `list_sessions` parameters: `active_only?` (default
+false), `limit?`.
+
+```json
+{ "action": "get_session_context", "session_id": "SESSION_ID", "include_entities": true }
+{ "action": "list_sessions", "active_only": true }
+```
+
+> To populate sessions, pass `session_id` when adding observations:
+> `{ "action": "add_observation", "entity_id": "...", "text": "...", "session_id": "SESSION_ID" }`.
+> The `session_id` is the `id` returned by `start_session`.
+
+### `manage_system` → `stats`
+
+Aggregate dashboard. No parameters.
+
+```json
+{ "action": "stats" }
+```
+
+Response: `{ overview: { total_entities, total_observations, total_relations }, by_type: [{ type, count }], timeline: { oldest_entity, newest_entity, entities_last_24h, entities_last_7d }, activity: { total_operations, top_types } }`
+
+### `mutate_memory` → `update_observation`
+
+Edit an observation in place instead of delete + recreate.
+
+Parameters: `observation_id` (required), `text?`, `metadata?`, `merge_metadata?`
+(default false — when true, merges into existing metadata instead of replacing).
+
+```json
+{ "action": "update_observation", "observation_id": "OBS_ID", "text": "Corrected text", "metadata": { "edited": true }, "merge_metadata": true }
+```
+
+Response: `{ status: "updated", observation: { id, entity_id, text, metadata, updated_at, previous_text } }`
+
+### `mutate_memory` → `batch_delete`
+
+Delete many entities at once (cascades to their observations/relations).
+
+Parameters: `entity_ids?: string[]` **or** `filter?: { type?, name_contains?,
+created_before?, created_after?, metadata?, tags? }`, `dry_run?` (default false —
+when true, only reports what would be deleted).
+
+```json
+{ "action": "batch_delete", "filter": { "type": "person", "tags": ["test"] }, "dry_run": true }
+```
+
+Response: `{ status: "deleted" | "dry_run", deleted_count, deleted_entities[], deleted_observations, deleted_relations, errors? }`
+
+### `mutate_memory` → `manage_tags`
+
+Lightweight tagging stored in `metadata.tags` (a string array). No separate
+table — tags are filterable via `list_entities`/`batch_delete`.
+
+Parameters: `operation` (`add` | `remove` | `set` | `list` | `search`),
+`entity_id?` (required for add/remove/set, optional for list),
+`tags?: string[]` (for add/remove/set), `search_tag?` (for search).
+
+```json
+{ "action": "manage_tags", "operation": "add", "entity_id": "ENTITY_ID", "tags": ["vip", "team"] }
+{ "action": "manage_tags", "operation": "search", "search_tag": "vip" }
+```
+
+### `mutate_memory` → `batch`
+
+Execute a sequence of mutations in one call.
+
+Parameters: `operations: [{ action, params }]` (sub-actions: `create_entity`,
+`add_observation`, `create_relation`, `delete_entity`, `update_observation`),
+`transactional?` (default true — all-or-nothing), `continue_on_error?` (default
+false — only honored when not transactional).
+
+```json
+{
+  "action": "batch",
+  "transactional": true,
+  "operations": [
+    { "action": "create_entity", "params": { "name": "Carol", "type": "person" } },
+    { "action": "create_entity", "params": { "name": "Dave", "type": "person" } }
+  ]
+}
+```
+
+Response: `{ status: "completed" | "partial" | "failed", results: [{ index, action, status, result?, error? }], summary: { total, succeeded, failed } }`
 
 ---
 
