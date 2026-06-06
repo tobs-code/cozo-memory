@@ -3679,6 +3679,720 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
     }
   }
 
+  // ===========================================================================
+  // Agent Features (query/mutation convenience actions)
+  // ===========================================================================
+
+  /** Feature 1: List entities with filtering, sorting and pagination. */
+  public async listEntities(args: {
+    type?: string;
+    types?: string[];
+    limit?: number;
+    offset?: number;
+    sort_by?: "name" | "created_at" | "updated_at";
+    sort_order?: "asc" | "desc";
+    name_contains?: string;
+    tags?: string[];
+  }) {
+    await this.initPromise;
+    try {
+      const limit = Math.min(Math.max(args.limit ?? 20, 1), 1000);
+      const offset = Math.max(args.offset ?? 0, 0);
+      const sortBy = args.sort_by ?? "created_at";
+      const sortOrder = args.sort_order ?? "desc";
+
+      const res = await this.db.run(
+        `?[id, name, type, metadata, ts] := *entity{id, name, type, metadata, created_at, @ "NOW"}, ts = to_int(created_at)`,
+      );
+
+      type EntRow = { id: string; name: string; type: string; metadata: Record<string, any>; created_at_us: number };
+      let rows: EntRow[] = (res.rows as any[]).map((r: any) => ({
+        id: r[0] as string,
+        name: r[1] as string,
+        type: r[2] as string,
+        metadata: (r[3] || {}) as Record<string, any>,
+        created_at_us: r[4] as number,
+      }));
+
+      // Filters (applied in JS for robustness across value types)
+      if (args.type) rows = rows.filter((e) => e.type === args.type);
+      if (args.types && args.types.length > 0) {
+        const set = new Set(args.types);
+        rows = rows.filter((e) => set.has(e.type));
+      }
+      if (args.name_contains) {
+        const needle = args.name_contains.toLowerCase();
+        rows = rows.filter((e) => String(e.name).toLowerCase().includes(needle));
+      }
+      if (args.tags && args.tags.length > 0) {
+        const want = args.tags;
+        rows = rows.filter((e) => {
+          const t = Array.isArray(e.metadata?.tags) ? e.metadata.tags : [];
+          return want.every((tag) => t.includes(tag));
+        });
+      }
+
+      const total = rows.length;
+
+      rows.sort((a, b) => {
+        let cmp = 0;
+        if (sortBy === "name") cmp = String(a.name).localeCompare(String(b.name));
+        else cmp = a.created_at_us - b.created_at_us; // created_at / updated_at both track the validity timestamp
+        return sortOrder === "asc" ? cmp : -cmp;
+      });
+
+      const page = rows.slice(offset, offset + limit);
+
+      // Count maps (one query each, regardless of page size)
+      const obsCount = new Map<string, number>();
+      const obsRes = await this.db.run('?[eid, count(oid)] := *observation{id: oid, entity_id: eid, @ "NOW"}');
+      obsRes.rows.forEach((r: any) => obsCount.set(r[0], Number(r[1])));
+
+      const relCount = new Map<string, number>();
+      const relOutRes = await this.db.run('?[eid, count(t)] := *relationship{from_id: eid, to_id: t, @ "NOW"}');
+      relOutRes.rows.forEach((r: any) => relCount.set(r[0], Number(r[1])));
+      const relInRes = await this.db.run('?[eid, count(f)] := *relationship{from_id: f, to_id: eid, @ "NOW"}');
+      relInRes.rows.forEach((r: any) => relCount.set(r[0], (relCount.get(r[0]) || 0) + Number(r[1])));
+
+      const entities = page.map((e) => ({
+        id: e.id,
+        name: e.name,
+        type: e.type,
+        metadata: e.metadata,
+        tags: Array.isArray(e.metadata?.tags) ? e.metadata.tags : [],
+        created_at: new Date(Math.floor(e.created_at_us / 1000)).toISOString(),
+        observation_count: obsCount.get(e.id) || 0,
+        relation_count: relCount.get(e.id) || 0,
+      }));
+
+      return { entities, total, offset, limit };
+    } catch (error: any) {
+      return { error: "Failed to list entities", message: error.message };
+    }
+  }
+
+  /** Feature 2: Aggregate statistics overview. */
+  public async getStats() {
+    await this.initPromise;
+    try {
+      const [eRes, oRes, rRes] = await Promise.all([
+        this.db.run('?[id, type, ts] := *entity{id, type, created_at, @ "NOW"}, ts = to_int(created_at)'),
+        this.db.run('?[count(id)] := *observation{id, @ "NOW"}'),
+        this.db.run('?[count(f)] := *relationship{from_id: f, to_id, @ "NOW"}'),
+      ]);
+
+      const entities = (eRes.rows as any[]).map((r: any) => ({ type: r[1] as string, ts: r[2] as number }));
+      const total_entities = entities.length;
+      const total_observations = Number(oRes.rows[0]?.[0] || 0);
+      const total_relations = Number(rRes.rows[0]?.[0] || 0);
+
+      const typeMap = new Map<string, number>();
+      entities.forEach((e) => typeMap.set(e.type, (typeMap.get(e.type) || 0) + 1));
+      const by_type = [...typeMap.entries()]
+        .map(([type, count]) => ({ type, count }))
+        .sort((a, b) => b.count - a.count);
+
+      const tss = entities.map((e) => e.ts).filter((n) => typeof n === "number");
+      const nowUs = Date.now() * 1000;
+      const dayUs = 24 * 3600 * 1000 * 1000;
+      const oldest = tss.length ? Math.min(...tss) : null;
+      const newest = tss.length ? Math.max(...tss) : null;
+
+      return {
+        overview: { total_entities, total_observations, total_relations },
+        by_type,
+        timeline: {
+          oldest_entity: oldest !== null ? new Date(Math.floor(oldest / 1000)).toISOString() : null,
+          newest_entity: newest !== null ? new Date(Math.floor(newest / 1000)).toISOString() : null,
+          entities_last_24h: tss.filter((t) => t >= nowUs - dayUs).length,
+          entities_last_7d: tss.filter((t) => t >= nowUs - 7 * dayUs).length,
+        },
+        activity: {
+          total_operations: this.metrics.performance.total_operations,
+          top_types: by_type.slice(0, 5),
+        },
+      };
+    } catch (error: any) {
+      return { error: "Failed to compute stats", message: error.message };
+    }
+  }
+
+  /** Feature 6: Update an observation's text and/or metadata (validity-preserving). */
+  public async updateObservation(args: {
+    observation_id: string;
+    text?: string;
+    metadata?: any;
+    merge_metadata?: boolean;
+  }) {
+    await this.initPromise;
+    const startTime = Date.now();
+    try {
+      const existing = await this.db.run(
+        `?[oid, eid, sid, tid, txt, emb, meta] := *observation{id: oid, entity_id: eid, session_id: sid, task_id: tid, text: txt, embedding: emb, metadata: meta, @ "NOW"}, oid = $id`,
+        { id: args.observation_id },
+      );
+      if (existing.rows.length === 0) return { error: "Observation not found" };
+
+      const row = existing.rows[0];
+      const prevText = row[4] as string;
+      const newText = args.text !== undefined && args.text !== null ? args.text : prevText;
+
+      let newMeta: any;
+      if (args.metadata !== undefined) {
+        newMeta = args.merge_metadata ? { ...(row[6] || {}), ...args.metadata } : args.metadata;
+      } else {
+        newMeta = row[6] || {};
+      }
+
+      let embedding = row[5];
+      if (args.text !== undefined && args.text !== prevText) {
+        embedding = await this.embeddingService.embed(newText);
+      }
+
+      const now = Date.now() * 1000;
+      await this.db.run(
+        `
+        ?[id, created_at, entity_id, session_id, task_id, text, embedding, metadata] <- [[$id, $v, $entity_id, $session_id, $task_id, $text, $embedding, $metadata]]
+        :put observation {id, created_at => entity_id, session_id, task_id, text, embedding, metadata}
+      `,
+        {
+          id: row[0],
+          v: [now, true],
+          entity_id: row[1],
+          session_id: row[2],
+          task_id: row[3],
+          text: newText,
+          embedding,
+          metadata: newMeta,
+        },
+      );
+
+      this.trackOperation('update_observation', startTime);
+      return {
+        status: "updated",
+        observation: {
+          id: row[0],
+          entity_id: row[1],
+          text: newText,
+          metadata: newMeta,
+          updated_at: new Date(Math.floor(now / 1000)).toISOString(),
+          previous_text: prevText,
+        },
+      };
+    } catch (error: any) {
+      this.trackError('update_observation');
+      return { error: "Update failed", message: error.message };
+    }
+  }
+
+  /** Feature 4: Aggregate full entity detail (observations, relations, optional community/timeline). */
+  public async getEntityDetail(args: {
+    entity_id: string;
+    include_observations?: boolean;
+    include_relations?: boolean;
+    include_community?: boolean;
+    include_timeline?: boolean;
+  }) {
+    await this.initPromise;
+    try {
+      const incObs = args.include_observations !== false;
+      const incRel = args.include_relations !== false;
+      const incCom = args.include_community === true;
+      const incTl = args.include_timeline === true;
+
+      const entRes = await this.db.run(
+        `?[name, type, metadata, ts] := *entity{id: $id, name, type, metadata, created_at, @ "NOW"}, ts = to_int(created_at)`,
+        { id: args.entity_id },
+      );
+      if (entRes.rows.length === 0) return { error: "Entity not found" };
+
+      const e = entRes.rows[0];
+      const metadata = (e[2] || {}) as Record<string, any>;
+      const created_at_us = e[3] as number;
+
+      const result: any = {
+        entity: {
+          id: args.entity_id,
+          name: e[0],
+          type: e[1],
+          metadata,
+          tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+          created_at: new Date(Math.floor(created_at_us / 1000)).toISOString(),
+        },
+      };
+
+      if (incObs) {
+        const obsRes = await this.db.run(
+          `?[oid, text, metadata, ts] := *observation{id: oid, entity_id: $id, text, metadata, created_at, @ "NOW"}, ts = to_int(created_at) :order ts`,
+          { id: args.entity_id },
+        );
+        result.observations = obsRes.rows.map((r: any) => ({
+          id: r[0],
+          text: r[1],
+          metadata: r[2],
+          created_at: new Date(Math.floor(r[3] / 1000)).toISOString(),
+        }));
+      }
+
+      if (incRel) {
+        const outRes = await this.db.run(
+          `?[tid, tname, ttype, rtype, strength, metadata] := *relationship{from_id: $id, to_id: tid, relation_type: rtype, strength, metadata, @ "NOW"}, *entity{id: tid, name: tname, type: ttype, @ "NOW"}`,
+          { id: args.entity_id },
+        );
+        const inRes = await this.db.run(
+          `?[sid, sname, stype, rtype, strength, metadata] := *relationship{from_id: sid, to_id: $id, relation_type: rtype, strength, metadata, @ "NOW"}, *entity{id: sid, name: sname, type: stype, @ "NOW"}`,
+          { id: args.entity_id },
+        );
+        result.relations = {
+          outgoing: outRes.rows.map((r: any) => ({
+            target_id: r[0],
+            target_name: r[1],
+            target_type: r[2],
+            relation_type: r[3],
+            strength: r[4],
+            metadata: r[5],
+          })),
+          incoming: inRes.rows.map((r: any) => ({
+            source_id: r[0],
+            source_name: r[1],
+            source_type: r[2],
+            relation_type: r[3],
+            strength: r[4],
+            metadata: r[5],
+          })),
+        };
+      }
+
+      if (incCom) {
+        try {
+          const comRes = await this.db.run(
+            `?[cid] := *entity_community{entity_id: $id, community_id: cid}`,
+            { id: args.entity_id },
+          );
+          if (comRes.rows.length > 0) {
+            const cid = comRes.rows[0][0];
+            const memRes = await this.db.run(
+              `?[mid, name, type] := *entity_community{entity_id: mid, community_id: $cid}, *entity{id: mid, name, type, @ "NOW"}`,
+              { cid },
+            );
+            result.community = {
+              id: cid,
+              members: memRes.rows.map((r: any) => ({ id: r[0], name: r[1], type: r[2] })),
+            };
+          } else {
+            result.community = null;
+          }
+        } catch {
+          result.community = null;
+        }
+      }
+
+      if (incTl) {
+        const timeline: any[] = [
+          {
+            timestamp: new Date(Math.floor(created_at_us / 1000)).toISOString(),
+            action: "created",
+            detail: `Entity '${e[0]}' created`,
+          },
+        ];
+        const obsT = await this.db.run(
+          `?[text, ts, asserted] := *observation{entity_id: $id, text, created_at}, ts = to_int(created_at), asserted = to_bool(created_at)`,
+          { id: args.entity_id },
+        );
+        obsT.rows.forEach((r: any) => {
+          if (r[2]) {
+            timeline.push({
+              timestamp: new Date(Math.floor(r[1] / 1000)).toISOString(),
+              action: "observation_added",
+              detail: String(r[0]).slice(0, 80),
+            });
+          }
+        });
+        const relT = await this.db.run(
+          `?[rtype, tid, ts, asserted] := *relationship{from_id: $id, to_id: tid, relation_type: rtype, created_at}, ts = to_int(created_at), asserted = to_bool(created_at)`,
+          { id: args.entity_id },
+        );
+        relT.rows.forEach((r: any) => {
+          if (r[3]) {
+            timeline.push({
+              timestamp: new Date(Math.floor(r[2] / 1000)).toISOString(),
+              action: "relation_added",
+              detail: `${r[0]} -> ${r[1]}`,
+            });
+          }
+        });
+        timeline.sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+        result.timeline = timeline;
+      }
+
+      return result;
+    } catch (error: any) {
+      return { error: "Failed to get entity detail", message: error.message };
+    }
+  }
+
+  /** Feature 3: Delete multiple entities by explicit IDs or by filter, with dry-run support. */
+  public async batchDeleteEntities(args: {
+    entity_ids?: string[];
+    filter?: {
+      type?: string;
+      name_contains?: string;
+      created_before?: string;
+      created_after?: string;
+      metadata?: Record<string, any>;
+      tags?: string[];
+    };
+    dry_run?: boolean;
+  }) {
+    await this.initPromise;
+    try {
+      const dryRun = args.dry_run === true;
+      let targetIds: string[] = [];
+
+      if (args.entity_ids && args.entity_ids.length > 0) {
+        targetIds = [...args.entity_ids];
+      } else if (args.filter) {
+        const f = args.filter;
+        const all = await this.db.run(
+          `?[id, name, type, metadata, ts] := *entity{id, name, type, metadata, created_at, @ "NOW"}, ts = to_int(created_at)`,
+        );
+        const beforeUs = f.created_before ? Date.parse(f.created_before) * 1000 : null;
+        const afterUs = f.created_after ? Date.parse(f.created_after) * 1000 : null;
+        targetIds = all.rows
+          .filter((r: any) => {
+            const [, name, type, meta, ts] = r;
+            if (f.type && type !== f.type) return false;
+            if (f.name_contains && !String(name).toLowerCase().includes(f.name_contains.toLowerCase())) return false;
+            if (beforeUs !== null && !(ts < beforeUs)) return false;
+            if (afterUs !== null && !(ts > afterUs)) return false;
+            if (f.metadata) {
+              for (const [k, v] of Object.entries(f.metadata)) {
+                if (JSON.stringify((meta || {})[k]) !== JSON.stringify(v)) return false;
+              }
+            }
+            if (f.tags && f.tags.length > 0) {
+              const t = Array.isArray(meta?.tags) ? meta.tags : [];
+              if (!f.tags.every((tag) => t.includes(tag))) return false;
+            }
+            return true;
+          })
+          .map((r: any) => r[0] as string);
+      } else {
+        return { error: "Either entity_ids or filter is required" };
+      }
+
+      targetIds = [...new Set(targetIds)];
+
+      let deleted_observations = 0;
+      let deleted_relations = 0;
+      const deleted_entities: string[] = [];
+      const errors: Array<{ id: string; error: string }> = [];
+
+      for (const id of targetIds) {
+        const exists = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id });
+        if (exists.rows.length === 0) {
+          errors.push({ id, error: "Entity not found" });
+          continue;
+        }
+
+        if (dryRun) {
+          const obsC = await this.db.run('?[count(oid)] := *observation{id: oid, entity_id: $id, @ "NOW"}', { id });
+          const relOutC = await this.db.run('?[count(t)] := *relationship{from_id: $id, to_id: t, @ "NOW"}', { id });
+          const relInC = await this.db.run('?[count(f)] := *relationship{from_id: f, to_id: $id, @ "NOW"}', { id });
+          deleted_observations += Number(obsC.rows[0]?.[0] || 0);
+          deleted_relations += Number(relOutC.rows[0]?.[0] || 0) + Number(relInC.rows[0]?.[0] || 0);
+          deleted_entities.push(id);
+        } else {
+          const res: any = await this.deleteEntity({ entity_id: id });
+          if (res.error) {
+            errors.push({ id, error: res.message || res.error });
+            continue;
+          }
+          deleted_observations += Number(res.deleted?.observations || 0);
+          deleted_relations += Number(res.deleted?.outgoing_relations || 0) + Number(res.deleted?.incoming_relations || 0);
+          deleted_entities.push(id);
+        }
+      }
+
+      return {
+        status: dryRun ? "dry_run" : "deleted",
+        deleted_count: deleted_entities.length,
+        deleted_entities,
+        deleted_observations,
+        deleted_relations,
+        ...(errors.length ? { errors } : {}),
+      };
+    } catch (error: any) {
+      return { error: "Batch delete failed", message: error.message };
+    }
+  }
+
+  /** Feature 5: Lightweight tag management stored in metadata.tags. */
+  public async manageTags(args: {
+    operation: "add" | "remove" | "set" | "list" | "search";
+    entity_id?: string;
+    tags?: string[];
+    search_tag?: string;
+  }) {
+    await this.initPromise;
+    try {
+      const op = args.operation;
+
+      if (op === "search") {
+        if (!args.search_tag) return { error: "search_tag is required for search" };
+        const all = await this.db.run(`?[id, name, type, metadata] := *entity{id, name, type, metadata, @ "NOW"}`);
+        const entities = all.rows
+          .filter((r: any) => Array.isArray(r[3]?.tags) && r[3].tags.includes(args.search_tag))
+          .map((r: any) => ({ id: r[0], name: r[1], type: r[2] }));
+        return { tag: args.search_tag, entities, count: entities.length };
+      }
+
+      if (op === "list") {
+        if (args.entity_id) {
+          const res = await this.db.run(`?[metadata] := *entity{id: $id, metadata, @ "NOW"}`, { id: args.entity_id });
+          if (res.rows.length === 0) return { error: "Entity not found" };
+          const t = Array.isArray(res.rows[0][0]?.tags) ? res.rows[0][0].tags : [];
+          return { entity_id: args.entity_id, tags: t };
+        }
+        const all = await this.db.run(`?[metadata] := *entity{metadata, @ "NOW"}`);
+        const counts = new Map<string, number>();
+        all.rows.forEach((r: any) => {
+          const t = Array.isArray(r[0]?.tags) ? r[0].tags : [];
+          t.forEach((tag: string) => counts.set(tag, (counts.get(tag) || 0) + 1));
+        });
+        return {
+          tags: [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count),
+        };
+      }
+
+      // add / remove / set
+      if (!args.entity_id) return { error: "entity_id is required" };
+      const tags = args.tags || [];
+      const res = await this.db.run(`?[metadata] := *entity{id: $id, metadata, @ "NOW"}`, { id: args.entity_id });
+      if (res.rows.length === 0) return { error: "Entity not found" };
+      const meta = res.rows[0][0] || {};
+      const current: string[] = Array.isArray(meta.tags) ? meta.tags : [];
+
+      let next: string[];
+      if (op === "add") next = [...new Set([...current, ...tags])];
+      else if (op === "remove") next = current.filter((t) => !tags.includes(t));
+      else if (op === "set") next = [...new Set(tags)];
+      else return { error: `Invalid operation: ${op}` };
+
+      // Replace metadata.tags fully. updateEntity uses `++` which concatenates
+      // arrays (producing duplicates), so write metadata directly instead.
+      const newMeta = { ...meta, tags: next };
+      await this.db.run(
+        `?[id, created_at, metadata] := *entity{id, created_at, @ "NOW"}, id = $id, metadata = $meta :update entity {id, created_at, metadata}`,
+        { id: args.entity_id, meta: newMeta },
+      );
+      return { status: "tags_updated", entity_id: args.entity_id, operation: op, tags: next };
+    } catch (error: any) {
+      return { error: "Tag operation failed", message: error.message };
+    }
+  }
+
+  /** Feature 7: Execute a sequence of mutation operations (transactional or best-effort). */
+  public async executeBatch(args: {
+    operations: Array<{ action: string; params?: any; [key: string]: any }>;
+    continue_on_error?: boolean;
+    transactional?: boolean;
+  }) {
+    await this.initPromise;
+    try {
+      const ops = args.operations || [];
+      if (ops.length === 0) return { error: "No operations provided" };
+
+      const transactional = args.transactional !== false; // default: true (all-or-nothing)
+      const continueOnError = args.continue_on_error === true;
+
+      const opParams = (op: any) => {
+        if (op.params !== undefined) return op.params;
+        const { action, ...rest } = op;
+        return rest;
+      };
+
+      if (transactional) {
+        const mapped = ops.map((op) => ({ action: op.action as any, params: opParams(op) }));
+        const txn: any = await this.runTransaction({ operations: mapped });
+        if (txn.error) {
+          return {
+            status: "failed",
+            results: ops.map((op, i) => ({ index: i, action: op.action, status: "error", error: txn.error })),
+            summary: { total: ops.length, succeeded: 0, failed: ops.length },
+            error: txn.error,
+            message: txn.message,
+          };
+        }
+        return {
+          status: "completed",
+          results: ops.map((op, i) => ({ index: i, action: op.action, status: "success" })),
+          summary: { total: ops.length, succeeded: ops.length, failed: 0 },
+          transaction: txn,
+        };
+      }
+
+      const results: any[] = [];
+      let succeeded = 0;
+      let failed = 0;
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const params = opParams(op);
+        try {
+          let r: any;
+          if (op.action === "create_entity") r = await this.createEntity(params);
+          else if (op.action === "add_observation") r = await this.addObservation(params);
+          else if (op.action === "create_relation") r = await this.createRelation(params);
+          else if (op.action === "delete_entity") r = await this.deleteEntity({ entity_id: params.entity_id });
+          else if (op.action === "update_observation") r = await this.updateObservation(params);
+          else r = { error: `Unsupported batch action: ${op.action}` };
+
+          if (r && r.error) {
+            failed++;
+            results.push({ index: i, action: op.action, status: "error", error: r.message || r.error });
+            if (!continueOnError) break;
+          } else {
+            succeeded++;
+            results.push({ index: i, action: op.action, status: "success", result: r });
+          }
+        } catch (e: any) {
+          failed++;
+          results.push({ index: i, action: op.action, status: "error", error: e.message || String(e) });
+          if (!continueOnError) break;
+        }
+      }
+      const status = failed === 0 ? "completed" : succeeded === 0 ? "failed" : "partial";
+      return { status, results, summary: { total: ops.length, succeeded, failed } };
+    } catch (error: any) {
+      return { error: "Batch execution failed", message: error.message };
+    }
+  }
+
+  /** Feature 8: Retrieve the context (observations/entities/timeline) of a session. */
+  public async getSessionContext(args: {
+    session_id?: string;
+    include_observations?: boolean;
+    include_entities?: boolean;
+    include_timeline?: boolean;
+    limit?: number;
+  }) {
+    await this.initPromise;
+    try {
+      const incObs = args.include_observations !== false;
+      const incEnt = args.include_entities === true;
+      const incTl = args.include_timeline === true;
+      const limit = Math.min(Math.max(args.limit ?? 50, 1), 1000);
+
+      let sessionId = args.session_id;
+      if (!sessionId) {
+        const latest = await this.db.run(
+          `?[sid, la] := *session_state{session_id: sid, last_active: la} :order -la :limit 1`,
+        );
+        if (latest.rows.length === 0) return { error: "No sessions found" };
+        sessionId = latest.rows[0][0] as string;
+      }
+
+      const ss = await this.db.run(
+        `?[la, status, meta] := *session_state{session_id: $sid, last_active: la, status, metadata: meta}`,
+        { sid: sessionId },
+      );
+
+      const obsRes = await this.db.run(
+        `?[oid, eid, text, metadata, ts] := *observation{id: oid, entity_id: eid, session_id: $sid, text, metadata, created_at, @ "NOW"}, ts = to_int(created_at) :order -ts`,
+        { sid: sessionId },
+      );
+      const obsRows = obsRes.rows;
+      const entityIds: string[] = [...new Set((obsRows as any[]).map((r: any) => r[1] as string))];
+
+      const nameMap = new Map<string, { name: string; type: string; ts: number }>();
+      if (entityIds.length) {
+        const entRes = await this.db.run(
+          `?[id, name, type, ts] := *entity{id, name, type, created_at, @ "NOW"}, ts = to_int(created_at)`,
+        );
+        entRes.rows.forEach((r: any) => nameMap.set(r[0], { name: r[1], type: r[2], ts: r[3] }));
+      }
+
+      const tss = obsRows.map((r: any) => r[4] as number);
+      const created_at = tss.length ? new Date(Math.floor(Math.min(...tss) / 1000)).toISOString() : null;
+
+      const session_metadata: any = {
+        observation_count: obsRows.length,
+        entity_count: entityIds.length,
+        created_at,
+      };
+      if (ss.rows.length > 0) {
+        session_metadata.last_active = ss.rows[0][0];
+        session_metadata.status = ss.rows[0][1];
+        session_metadata.metadata = ss.rows[0][2];
+      }
+
+      const result: any = { session_id: sessionId, session_metadata };
+
+      if (incObs) {
+        result.observations = obsRows.slice(0, limit).map((r: any) => ({
+          id: r[0],
+          text: r[2],
+          entity_id: r[1],
+          entity_name: nameMap.get(r[1])?.name ?? null,
+          created_at: new Date(Math.floor(r[4] / 1000)).toISOString(),
+          metadata: r[3],
+        }));
+      }
+      if (incEnt) {
+        result.entities = entityIds.map((id: string) => {
+          const info = nameMap.get(id);
+          return {
+            id,
+            name: info?.name ?? null,
+            type: info?.type ?? null,
+            created_at: info?.ts ? new Date(Math.floor(info.ts / 1000)).toISOString() : null,
+          };
+        });
+      }
+      if (incTl) {
+        result.timeline = obsRows
+          .slice()
+          .sort((a: any, b: any) => a[4] - b[4])
+          .map((r: any) => ({
+            timestamp: new Date(Math.floor(r[4] / 1000)).toISOString(),
+            action: "observation_added",
+            detail: String(r[2]).slice(0, 80),
+          }));
+      }
+      return result;
+    } catch (error: any) {
+      return { error: "Failed to get session context", message: error.message };
+    }
+  }
+
+  /** Feature 8: List known sessions with activity metadata. */
+  public async listSessions(args: { active_only?: boolean; limit?: number }) {
+    await this.initPromise;
+    try {
+      const limit = Math.min(Math.max(args.limit ?? 50, 1), 1000);
+      const res = await this.db.run(
+        `?[sid, la, status, meta] := *session_state{session_id: sid, last_active: la, status, metadata: meta} :order -la`,
+      );
+      let rows = res.rows;
+      if (args.active_only) rows = rows.filter((r: any) => r[2] === "active");
+
+      const obsMap = new Map<string, number>();
+      const obsRes = await this.db.run(`?[sid, count(oid)] := *observation{id: oid, session_id: sid, @ "NOW"}, sid != ""`);
+      obsRes.rows.forEach((r: any) => obsMap.set(r[0], Number(r[1])));
+
+      const sessions = rows.slice(0, limit).map((r: any) => ({
+        session_id: r[0],
+        last_active: r[1],
+        status: r[2],
+        metadata: r[3],
+        observation_count: obsMap.get(r[0]) || 0,
+      }));
+      return { sessions, total: rows.length };
+    } catch (error: any) {
+      return { error: "Failed to list sessions", message: error.message };
+    }
+  }
+
   private registerTools() {
     const MetadataSchema = z.record(z.string(), z.any());
 
@@ -3852,11 +4566,50 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
         entity_id: z.string().describe("Entity ID to resolve conflicts for"),
         auto_resolve: z.boolean().optional().default(false).describe("Automatically resolve all conflicts"),
       }),
+      z.object({
+        action: z.literal("update_observation"),
+        observation_id: z.string().describe("ID of the observation to update"),
+        text: z.string().optional().describe("New observation text (re-embedded if changed)"),
+        metadata: MetadataSchema.optional().describe("New metadata"),
+        merge_metadata: z.boolean().optional().default(false).describe("Merge with existing metadata instead of replacing"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("batch_delete"),
+        entity_ids: z.array(z.string()).optional().describe("Explicit list of entity IDs to delete"),
+        filter: z.object({
+          type: z.string().optional().describe("Delete all entities of this type"),
+          name_contains: z.string().optional().describe("Name contains (case-insensitive)"),
+          created_before: z.string().optional().describe("ISO date, only entities created before"),
+          created_after: z.string().optional().describe("ISO date, only entities created after"),
+          metadata: MetadataSchema.optional().describe("Metadata exact-match filter"),
+          tags: z.array(z.string()).optional().describe("Only entities having all of these tags (metadata.tags)"),
+        }).optional().describe("Filter criteria (alternative to entity_ids)"),
+        dry_run: z.boolean().optional().default(false).describe("If true, only count without deleting"),
+      }).passthrough().refine((v) => Boolean((v as any).entity_ids) || Boolean((v as any).filter), {
+        message: "entity_ids or filter is required",
+        path: ["entity_ids"],
+      }),
+      z.object({
+        action: z.literal("manage_tags"),
+        operation: z.enum(["add", "remove", "set", "list", "search"]).describe("Tag operation"),
+        entity_id: z.string().optional().describe("Required for add/remove/set; optional for list"),
+        tags: z.array(z.string()).optional().describe("Tag list for add/remove/set"),
+        search_tag: z.string().optional().describe("Tag to search for (operation=search)"),
+      }).passthrough(),
+      z.object({
+        action: z.literal("batch"),
+        operations: z.array(z.object({
+          action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity", "update_observation"]),
+          params: z.any().optional().describe("Parameters for the operation (object); flat fields also accepted"),
+        }).passthrough()).describe("List of operations to execute"),
+        continue_on_error: z.boolean().optional().default(false).describe("Keep going after a failed operation (non-transactional)"),
+        transactional: z.boolean().optional().default(true).describe("All-or-nothing execution (default true)"),
+      }).passthrough(),
     ]);
 
     const MutateMemoryParameters = z.object({
       action: z
-        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task", "invalidate_observation", "invalidate_relation", "enrich_observation", "record_memory_access", "prune_weak_memories", "detect_conflicts", "resolve_conflicts"])
+        .enum(["create_entity", "update_entity", "delete_entity", "add_observation", "create_relation", "run_transaction", "add_inference_rule", "ingest_file", "start_session", "stop_session", "start_task", "stop_task", "invalidate_observation", "invalidate_relation", "enrich_observation", "record_memory_access", "prune_weak_memories", "detect_conflicts", "resolve_conflicts", "update_observation", "batch_delete", "manage_tags", "batch"])
         .describe("Action (determines which fields are required)"),
       name: z.string().optional().describe("For create_entity (required) or add_inference_rule (required)"),
       type: z.string().optional().describe("For create_entity (required)"),
@@ -3878,12 +4631,22 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
       relation_type: z.string().optional().describe("For create_relation (required)"),
       strength: z.number().min(0).max(1).optional().describe("Optional for create_relation"),
       metadata: MetadataSchema.optional().describe("Optional for create_entity/update_entity/add_observation/create_relation/ingest_file"),
-      observation_id: z.string().optional().describe("For invalidate_observation (required) or enrich_observation (required) or record_memory_access (required)"),
-      dry_run: z.boolean().optional().describe("For prune_weak_memories: if true, only shows candidates"),
+      observation_id: z.string().optional().describe("For invalidate_observation (required) or enrich_observation (required) or record_memory_access (required) or update_observation (required)"),
+      session_id: z.string().optional().describe("For add_observation/start_task: associate the observation/task with a session"),
+      task_id: z.string().optional().describe("For add_observation: associate the observation with a task"),
+      dry_run: z.boolean().optional().describe("For prune_weak_memories/batch_delete: if true, only shows candidates"),
       operations: z.array(z.object({
-        action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity"]),
+        action: z.enum(["create_entity", "add_observation", "create_relation", "delete_entity", "update_observation"]),
         params: z.any().describe("Parameters for the operation as an object")
-      })).optional().describe("For run_transaction: List of operations to be executed atomically"),
+      })).optional().describe("For run_transaction/batch: List of operations to be executed"),
+      merge_metadata: z.boolean().optional().describe("For update_observation: merge instead of replace metadata"),
+      entity_ids: z.array(z.string()).optional().describe("For batch_delete: explicit entity IDs"),
+      filter: z.any().optional().describe("For batch_delete: filter criteria (type, name_contains, created_before/after, metadata, tags)"),
+      operation: z.enum(["add", "remove", "set", "list", "search"]).optional().describe("For manage_tags"),
+      tags: z.array(z.string()).optional().describe("For manage_tags (add/remove/set)"),
+      search_tag: z.string().optional().describe("For manage_tags (operation=search)"),
+      continue_on_error: z.boolean().optional().describe("For batch: continue after failures (non-transactional)"),
+      transactional: z.boolean().optional().describe("For batch: all-or-nothing (default true)"),
     });
 
     this.mcp.addTool({
@@ -4063,6 +4826,11 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
           }
         }
 
+        if (action === "update_observation") return JSON.stringify(await this.updateObservation(rest));
+        if (action === "batch_delete") return JSON.stringify(await this.batchDeleteEntities(rest));
+        if (action === "manage_tags") return JSON.stringify(await this.manageTags(rest));
+        if (action === "batch") return JSON.stringify(await this.executeBatch(rest));
+
         return JSON.stringify({ error: "Unknown action" });
       },
     });
@@ -4226,11 +4994,43 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
         levels: z.array(z.number().min(0).max(3)).optional().describe("Memory levels to query (0-3)"),
         limit: z.number().optional().default(10).describe("Maximum number of results"),
       }),
+      z.object({
+        action: z.literal("list_entities"),
+        type: z.string().optional().describe("Filter by a single entity type"),
+        types: z.array(z.string()).optional().describe("Filter by multiple entity types"),
+        limit: z.number().min(1).max(1000).optional().default(20).describe("Page size (default 20, max 1000)"),
+        offset: z.number().min(0).optional().default(0).describe("Pagination offset"),
+        sort_by: z.enum(["name", "created_at", "updated_at"]).optional().default("created_at").describe("Sort field"),
+        sort_order: z.enum(["asc", "desc"]).optional().default("desc").describe("Sort order"),
+        name_contains: z.string().optional().describe("Case-insensitive substring filter on name"),
+        tags: z.array(z.string()).optional().describe("Only entities having all of these tags (metadata.tags)"),
+      }),
+      z.object({
+        action: z.literal("get_entity_detail"),
+        entity_id: z.string().describe("ID of the entity"),
+        include_observations: z.boolean().optional().default(true).describe("Include observations"),
+        include_relations: z.boolean().optional().default(true).describe("Include outgoing/incoming relations"),
+        include_community: z.boolean().optional().default(false).describe("Include community membership"),
+        include_timeline: z.boolean().optional().default(false).describe("Include a chronological timeline"),
+      }),
+      z.object({
+        action: z.literal("get_session_context"),
+        session_id: z.string().optional().describe("Session ID (defaults to the most recently active session)"),
+        include_observations: z.boolean().optional().default(true).describe("Include observations"),
+        include_entities: z.boolean().optional().default(false).describe("Include referenced entities"),
+        include_timeline: z.boolean().optional().default(false).describe("Include a chronological timeline"),
+        limit: z.number().min(1).max(1000).optional().default(50).describe("Max observations"),
+      }),
+      z.object({
+        action: z.literal("list_sessions"),
+        active_only: z.boolean().optional().default(false).describe("Only sessions with status 'active'"),
+        limit: z.number().min(1).max(1000).optional().default(50).describe("Max sessions"),
+      }),
     ]);
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query", "list_entities", "get_entity_detail", "get_session_context", "list_sessions"])
         .describe("Retrieval strategy - use 'search' for simple queries, 'adaptive_retrieval' for auto-optimization, 'context' for exploration"),
       query: z.string().optional().describe("Search query text (required for most actions)"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 10)"),
@@ -4250,6 +5050,17 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
       start_entity_id: z.string().optional().describe("For graph_walking: Starting entity for traversal"),
       rerank: z.boolean().optional().describe("For search/advancedSearch: Enable Cross-Encoder reranking for higher precision"),
       config: z.any().optional().describe("For dynamic_fusion: Fine-tune vector/sparse/FTS/graph weights and fusion strategy"),
+      type: z.string().optional().describe("For list_entities: filter by a single entity type"),
+      types: z.array(z.string()).optional().describe("For list_entities: filter by multiple entity types"),
+      offset: z.number().optional().describe("For list_entities: pagination offset"),
+      sort_by: z.enum(["name", "created_at", "updated_at"]).optional().describe("For list_entities: sort field"),
+      sort_order: z.enum(["asc", "desc"]).optional().describe("For list_entities: sort order"),
+      name_contains: z.string().optional().describe("For list_entities: case-insensitive substring filter on name"),
+      tags: z.array(z.string()).optional().describe("For list_entities: only entities having all of these tags"),
+      include_relations: z.boolean().optional().describe("For get_entity_detail: include relations (default true)"),
+      include_community: z.boolean().optional().describe("For get_entity_detail: include community (default false)"),
+      include_timeline: z.boolean().optional().describe("For get_entity_detail/get_session_context: include timeline"),
+      active_only: z.boolean().optional().describe("For list_sessions: only active sessions"),
     });
 
     this.mcp.addTool({
@@ -4945,6 +5756,46 @@ Note: User profile observations (entity_id='global_user_profile') are automatica
           });
         }
 
+        if (input.action === "list_entities") {
+          return JSON.stringify(await this.listEntities({
+            type: input.type,
+            types: input.types,
+            limit: input.limit,
+            offset: input.offset,
+            sort_by: input.sort_by,
+            sort_order: input.sort_order,
+            name_contains: input.name_contains,
+            tags: input.tags,
+          }));
+        }
+
+        if (input.action === "get_entity_detail") {
+          return JSON.stringify(await this.getEntityDetail({
+            entity_id: input.entity_id,
+            include_observations: input.include_observations,
+            include_relations: input.include_relations,
+            include_community: input.include_community,
+            include_timeline: input.include_timeline,
+          }));
+        }
+
+        if (input.action === "get_session_context") {
+          return JSON.stringify(await this.getSessionContext({
+            session_id: input.session_id,
+            include_observations: input.include_observations,
+            include_entities: input.include_entities,
+            include_timeline: input.include_timeline,
+            limit: input.limit,
+          }));
+        }
+
+        if (input.action === "list_sessions") {
+          return JSON.stringify(await this.listSessions({
+            active_only: input.active_only,
+            limit: input.limit,
+          }));
+        }
+
         return JSON.stringify({ error: "Unknown action" });
       },
     });
@@ -5409,6 +6260,7 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
     const ManageSystemSchema = z.discriminatedUnion("action", [
       z.object({ action: z.literal("health") }),
       z.object({ action: z.literal("metrics") }),
+      z.object({ action: z.literal("stats") }),
       z.object({
         action: z.literal("export_memory"),
         format: z.enum(["json", "markdown", "obsidian"]).describe("Export format"),
@@ -5483,7 +6335,7 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact", "compress_memory_levels", "analyze_memory_distribution"])
+        .enum(["health", "metrics", "stats", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact", "compress_memory_levels", "analyze_memory_distribution"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -5577,6 +6429,10 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
           } catch (error: any) {
             return JSON.stringify({ error: "Failed to retrieve metrics", message: error.message });
           }
+        }
+
+        if (input.action === "stats") {
+          return JSON.stringify(await this.getStats());
         }
 
         if (input.action === "export_memory") {
