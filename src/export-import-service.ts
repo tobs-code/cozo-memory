@@ -23,7 +23,7 @@ interface ImportOptions {
 }
 
 export class ExportImportService {
-  constructor(private dbService: DbService) {}
+  constructor(private dbService: DbService, private embeddingDim: number = 1024) {}
 
   /**
    * Export memory to various formats
@@ -538,7 +538,7 @@ export class ExportImportService {
 
   private async createEntityWithId(id: string, name: string, type: string, metadata: any): Promise<void> {
     const now = Date.now() * 1000;
-    const zeroVec = new Array(1024).fill(0);
+    const zeroVec = new Array(this.embeddingDim).fill(0);
     
     // Escape strings properly for CozoDB
     const escapedName = name.replace(/"/g, '\\"');
@@ -566,15 +566,17 @@ export class ExportImportService {
 
   private async createObservationWithId(id: string, entityId: string, text: string, metadata: any): Promise<void> {
     const now = Date.now() * 1000;
-    const zeroVec = new Array(1024).fill(0);
+    const zeroVec = new Array(this.embeddingDim).fill(0);
     const escapedText = text.replace(/"/g, '\\"').replace(/\n/g, '\\n');
     
     await this.dbService.run(`
-      ?[id, entity_id, text, embedding, metadata, created_at] <- [[$id, $entity_id, $text, $embedding, $metadata, [${now}, true]]]
-      :insert observation {id, entity_id, text, embedding, metadata, created_at}
+      ?[id, entity_id, session_id, task_id, text, embedding, metadata, created_at] <- [[$id, $entity_id, $session_id, $task_id, $text, $embedding, $metadata, [${now}, true]]]
+      :insert observation {id, entity_id, session_id, task_id, text, embedding, metadata, created_at}
     `, {
       id,
       entity_id: entityId,
+      session_id: "",
+      task_id: "",
       text: escapedText,
       embedding: zeroVec,
       metadata: metadata || {}
