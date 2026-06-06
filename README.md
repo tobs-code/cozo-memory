@@ -5,6 +5,9 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![MCP Badge](https://lobehub.com/badge/mcp/tobs-code-cozo-memory)](https://lobehub.com/mcp/tobs-code-cozo-memory)
 
+> **Why Cozo Memory?**  
+> LLMs have short-term memory limits. Standard RAG retrieves documents but can't connect facts across time. Cozo Memory gives your AI agent **persistent, structured memory** – it remembers past conversations, infers relationships, detects contradictions, and explores its knowledge graph – all fully offline on your machine.
+
 **Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – all in a single binary, no cloud, no Docker.**
 
 ## Table of Contents
@@ -90,7 +93,7 @@ The core advantage is **Intelligence and Traceability**: By combining an **Agent
 - **RAM: 1.7 GB minimum** (for default bge-m3 model)
   - Model download: ~600 MB
   - Runtime memory: ~1.1 GB
-  - For lower-spec machines, see [Embedding Model Options](#embedding-model-options) below
+  - ⚡ **Too heavy?** Use `EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2` – only **~400 MB RAM** needed (see [Embedding Model Options](#embedding-model-options))
 - CozoDB native dependency is installed via `cozo-node`
 
 ### Via npm (Easiest)
