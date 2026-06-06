@@ -341,10 +341,10 @@ The interface is reduced to **5 consolidated tools**:
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
-| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, transactions, sessions, tasks |
-| `query_memory` | Read operations | search, advancedSearch, context, graph_rag, graph_walking, agentic_search, adaptive_retrieval |
+| `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, transactions, sessions, tasks, update_observation, batch_delete, manage_tags, batch |
+| `query_memory` | Read operations | search, advancedSearch, context, graph_rag, graph_walking, agentic_search, adaptive_retrieval, list_entities, get_entity_detail, get_session_context, list_sessions |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, shortest_path, semantic_walk |
-| `manage_system` | Maintenance | health, metrics, export, import, cleanup, defrag, reflect, snapshots |
+| `manage_system` | Maintenance | health, metrics, stats, export, import, cleanup, defrag, reflect, snapshots |
 | `edit_user_profile` | User preferences | Edit global user profile with preferences and work style |
 
 > **See [docs/API.md](docs/API.md) for complete API reference with all parameters and examples**

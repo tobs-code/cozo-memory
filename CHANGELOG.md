@@ -5,6 +5,37 @@ All notable changes to CozoDB Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Agent convenience features
+
+- **`query_memory` action `list_entities`**: List/browse entities with filtering
+  (`type`/`types`, `name_contains`, `tags`), sorting (`sort_by`, `sort_order`)
+  and pagination (`limit`, `offset`). Returns per-entity `observation_count` and
+  `relation_count`.
+- **`query_memory` action `get_entity_detail`**: Aggregate an entity with its
+  observations, outgoing/incoming relations and (optionally) community and a
+  chronological timeline in a single call.
+- **`query_memory` action `get_session_context`**: Return a session's
+  observations (and optionally referenced entities and a timeline). Defaults to
+  the most recently active session when `session_id` is omitted.
+- **`query_memory` action `list_sessions`**: List sessions with `last_active`,
+  `status`, metadata and `observation_count`; supports `active_only`.
+- **`manage_system` action `stats`**: Dashboard with overview counts, per-type
+  breakdown, and timeline (oldest/newest, entities in last 24h/7d).
+- **`mutate_memory` action `update_observation`**: Edit an observation's text
+  and/or metadata (`merge_metadata` to merge instead of replace); returns
+  `previous_text`.
+- **`mutate_memory` action `batch_delete`**: Delete multiple entities by explicit
+  `entity_ids` or a `filter` (`type`, `name_contains`, `created_before/after`,
+  `metadata`, `tags`); `dry_run` reports what would be deleted.
+- **`mutate_memory` action `manage_tags`**: Lightweight tags stored in
+  `metadata.tags` — `add`/`remove`/`set`/`list`/`search`.
+- **`mutate_memory` action `batch`**: Execute a sequence of mutations, either
+  transactionally (all-or-nothing) or best-effort (`continue_on_error`).
+- **`mutate_memory`**: `add_observation` now accepts `session_id`/`task_id`
+  through the MCP layer, so observations can be linked to sessions/tasks.
+
 ## [2.16.0] - 2026-03-03
 
 ### Changed
