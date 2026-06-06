@@ -3571,7 +3571,7 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
   }) {
     await this.initPromise;
     const dbService = { run: (query: string, params?: any) => this.db.run(query, params) };
-    const exportService = new ExportImportService(dbService as any);
+    const exportService = new ExportImportService(dbService as any, this.embeddingService.getDimensions());
     return exportService.exportMemory(args);
   }
 
@@ -3583,7 +3583,7 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
   }) {
     await this.initPromise;
     const dbService = { run: (query: string, params?: any) => this.db.run(query, params) };
-    const exportService = new ExportImportService(dbService as any);
+    const exportService = new ExportImportService(dbService as any, this.embeddingService.getDimensions());
     return exportService.importMemory(args.data, {
       sourceFormat: args.sourceFormat,
       mergeStrategy: args.mergeStrategy,
