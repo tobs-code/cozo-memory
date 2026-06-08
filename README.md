@@ -7,6 +7,8 @@
 
 > **Why Cozo Memory?**  
 > LLMs have short-term memory limits. Standard RAG retrieves documents but can't connect facts across time. Cozo Memory gives your AI agent **persistent, structured memory** – it remembers past conversations, infers relationships, detects contradictions, and explores its knowledge graph – fully on your machine, with **optional local LLM integration via Ollama** for intelligent actions (cleanup, reflection, summarization, agentic routing).
+>
+> Most memory stacks combine separate databases: SQLite for facts, Chroma for vector search, NetworkX for graphs. **CozoDB replaces all of that with one embedded engine**: relational, graph, vector, and full-text search in a single query language, one file, zero sync lag.
 
 **Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – runs entirely on your machine. Optional [Ollama](https://ollama.ai) integration enables LLM-powered actions (cleanup, reflect, summarize, agentic retrieval).**
 
@@ -65,17 +67,36 @@ Now add the server to your MCP client (e.g. Claude Desktop) – see [Integration
 
 ## Positioning & Comparison
 
+### Why CozoDB instead of SQLite + Chroma + NetworkX?
+
+A common first question is: *"Why not just combine existing tools?"*
+
+| If you need... | Typical separate stack | CozoDB Memory |
+| :--- | :--- | :--- |
+| Structured data & relations | **SQLite** / PostgreSQL | ✅ Built-in relational engine |
+| Semantic / vector search | **Chroma** / Qdrant / Pinecone | ✅ HNSW + FTS + RRF in one engine |
+| Graph traversal & reasoning | **NetworkX** / Neo4j | ✅ Native graph queries + PageRank |
+| Time-travel / versioning | Custom audit tables | ✅ Built-in `Validity` time-travel |
+| Unified query language | Multiple APIs + glue code | ✅ Single Datalog query across all dimensions |
+
+**The core insight:** Most memory stacks bolt vector search onto a graph DB, or graph search onto a vector DB. CozoDB is different: it is a **single engine** that natively combines relational, graph, vector, and full-text search. That means:
+
+- **One query language** (Datalog) reaches every dimension.
+- **No sync lag** between separate indexes.
+- **No ETL bridge** between "vector results" and "graph expansion."
+- **Smaller operational surface**: one database file, one process, one dependency chain.
+
+### Comparison with other memory solutions
+
 Most "Memory" MCP servers fall into two categories:
 1. **Simple Knowledge Graphs**: CRUD operations on triples, often only text search
 2. **Pure Vector Stores**: Semantic search (RAG), but little understanding of complex relationships
 
-This server fills the gap in between ("Sweet Spot"): A **local, database-backed memory engine** combining vector, graph, and keyword signals.
-
-### Comparison with other solutions
+This server fills the gap in between ("Sweet Spot"): A **local, database-backed memory engine** combining vector, graph, and keyword signals — powered by CozoDB's unified engine rather than a patchwork of separate databases.
 
 | Feature | **CozoDB Memory (This Project)** | **Official Reference (`@modelcontextprotocol/server-memory`)** | **mcp-memory-service (Community)** | **Database Adapters (Qdrant/Neo4j)** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Backend** | **CozoDB** (Graph + Vector + Relational) | JSON file (`memory.jsonl`) | SQLite / Cloudflare | Specialized DB (only Vector or Graph) |
+| **Backend** | **CozoDB** (Graph + Vector + Relational + FTS in one engine) | JSON file (`memory.jsonl`) | SQLite / Cloudflare | Specialized DB (only Vector or Graph) |
 | **Search Logic** | **Agentic (Auto-Route)**: Hybrid + Graph + Summaries | Keyword only / Exact Graph Match | Vector + Keyword | Mostly only one dimension |
 | **Inference** | **Yes**: Built-in engine for implicit knowledge | No | No ("Dreaming" is consolidation) | No (Retrieval only) |
 | **Community** | **Yes**: Hierarchical Community Summaries | No | No | Only clustering (no summary) |

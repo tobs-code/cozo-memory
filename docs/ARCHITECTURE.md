@@ -1,6 +1,6 @@
 # Architecture
 
-CozoDB Memory is built on a layered architecture combining graph, vector, and relational capabilities in a single embedded database.
+CozoDB Memory is built on a layered architecture combining graph, vector, full-text, and relational capabilities in a single embedded database. The practical benefit: **one engine, one query language, one file**. There is no separate vector database, graph database, and relational database to keep in sync.
 
 ## System Architecture
 

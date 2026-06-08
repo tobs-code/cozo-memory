@@ -1,5 +1,5 @@
 {
-  "name": "@tobs-code/cozo-memory",
+  "name": "cozo-memory",
   "version": "1.2.9",
   "mcpName": "io.github.tobs-code/cozo-memory",
   "description": "Local-first persistent memory system for AI agents with hybrid search, graph reasoning, and MCP integration",

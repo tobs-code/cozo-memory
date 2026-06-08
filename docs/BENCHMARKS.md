@@ -4,18 +4,16 @@ Performance metrics and evaluation results for CozoDB Memory.
 
 ## Benchmark Results
 
-Benchmarks on a standard developer laptop (Windows, Node.js 20+, CPU-only):
+Benchmarks on a standard developer laptop (Windows, Node.js 20+, CPU-only, Xenova/bge-m3, SQLite):
 
 | Metric | Value | Note |
 | :--- | :--- | :--- |
-| **Graph-Walking (Recursive)** | **~130 ms** | Vector Seed + Recursive Datalog Traversal |
-| **Graph-RAG (Breadth-First)** | **~335 ms** | Vector Seeds + 2-Hop Expansion |
-| **Hybrid Search (Cache Hit)** | **< 0.1 ms** | **v0.8+ Semantic Cache** |
-| **Hybrid Search (Cold)** | **~35 ms** | FTS + HNSW + RRF Fusion |
-| **Vector Search (Raw)** | **~51 ms** | Pure semantic search as reference |
-| **FTS Search (Raw)** | **~12 ms** | Native Full-Text Search Performance |
-| **Ingestion** | **~102 ms** | Per Op (Write + Embedding + FTS/LSH Indexing) |
-| **RAM Usage** | **~1.7 GB** | Primarily due to local `Xenova/bge-m3` model |
+| **Graph-Walking (Recursive)** | **~62 ms** | Vector Seed + Recursive Datalog Traversal |
+| **Graph-RAG (Breadth-First)** | **~60 ms** | Vector Seeds + 2-Hop Expansion |
+| **Hybrid Search (Cold)** | **~56 ms** | FTS + HNSW + RRF Fusion |
+| **Vector Search (Raw)** | **~2.7 ms** | Pure semantic search as reference |
+| **Ingestion** | **~101 ms** | Per Op (Write + Embedding + FTS/LSH Indexing) |
+| **RAM Usage** | **~1504 MB RSS / ~217 MB Heap** | See memory breakdown below |
 
 ## Running Benchmarks
 
@@ -44,23 +42,34 @@ This tool compares strategies using a synthetic dataset and measures **Recall@K*
 
 ### Evaluation Results
 
-| Method | Recall@10 | Avg Latency | Best For |
-| :--- | :--- | :--- | :--- |
-| **Graph-RAG** | **1.00** | **~32 ms** | Deep relational reasoning |
-| **Graph-RAG (Reranked)** | **1.00** | **~36 ms** | Maximum precision for relational data |
-| **Graph-Walking** | 1.00 | ~50 ms | Associative path exploration |
-| **Hybrid Search** | 1.00 | ~89 ms | Broad factual retrieval |
-| **Reranked Search** | 1.00 | ~20 ms | Ultra-precise factual search (Warm cache) |
+Latest measured numbers from the harder evaluation set with ambiguity, temporal changes, contradictions, and 220 distractor observations:
+
+| Method | Recall@10 | Recall@3 | MRR | nDCG@10 | Avg Latency | Best For |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Graph-RAG** | **1.000** | **0.700** | 0.486 | **0.790** | **~52 ms** | Deep relational reasoning |
+| **Hybrid Search** | **0.850** | **0.650** | 0.458 | **0.548** | **~66 ms** | Broad factual retrieval |
+| **Graph-Walking** | **0.850** | **0.650** | 0.458 | **0.584** | **~66 ms** | Associative path exploration |
+
+Notes:
+- Values are from `src/benchmark.ts` on Windows / Node.js 20 / CPU-only / Xenova/bge-m3 / SQLite.
+- Reranking is currently disabled in the default benchmark because the bundled reranker model path is incompatible with the installed Transformers.js pipeline set; rerank metrics should be added once that integration is fixed.
+- Do not insert internal estimates for other systems into the comparison table below; use only vendor docs, peer-reviewed benchmarks, or reproducible public reports.
 
 ## Performance Characteristics by Feature
 
 ### Hybrid Search
 
 **Cold Start:**
-- Vector Search: ~51ms
-- FTS Search: ~12ms
-- RRF Fusion: ~5ms
-- Total: ~35ms
+- Vector Search: ~2.6ms
+- Graph-RAG seed + expansion: ~61.9ms
+- Graph-Walking traversal: ~58.1ms
+- Hybrid Search total: ~55.8ms
+
+**Why Graph-RAG can be faster than Hybrid Search:**
+- `graphRag()` uses a narrower candidate pipeline: vector seed selection, then graph expansion, then lightweight scoring.
+- `advancedSearch()` used by `search()` builds a more general Datalog query with multiple optional constraints, post-filtering, time decay, and context boosts.
+- In the current synthetic benchmark, the graph-backed methods benefit from a smaller effective candidate set and earlier pruning, while Hybrid Search pays for broader query planning and result post-processing.
+- This does not mean Graph-RAG is universally faster; for broad factual retrieval with filters or time constraints, Hybrid Search is expected to be stronger despite higher average latency.
 
 **Warm Cache:**
 - L1 Memory Cache Hit: <0.1ms
@@ -71,14 +80,20 @@ This tool compares strategies using a synthetic dataset and measures **Recall@K*
 - Number of candidate results
 - Cache hit rate
 - Temporal decay calculations
+- Applied post-filters and graph constraints
 
 ### Graph-RAG
 
-**Performance:**
-- Vector Seed Search: ~20ms
-- Graph Expansion (2 hops): ~15ms
-- Result Aggregation: ~5ms
-- Total: ~32ms (without reranking)
+**Measured Performance:**
+- Vector Seed Search: part of ~61.9ms total
+- Graph Expansion (2 hops): included in total
+- Result Aggregation: included in total
+- Total: ~61.9ms measured in current benchmark
+
+**Why this can beat Hybrid Search in current measurements:**
+- Narrower retrieval path with fewer post-processing stages
+- Smaller candidate set before ranking/scoring
+- Earlier effective pruning in graph expansion
 
 **Factors:**
 - Max depth (default: 2)
@@ -88,11 +103,11 @@ This tool compares strategies using a synthetic dataset and measures **Recall@K*
 
 ### Graph-Walking
 
-**Performance:**
-- Vector Seed Search: ~20ms
-- Recursive Traversal: ~80ms
-- Semantic Filtering: ~30ms
-- Total: ~130ms
+**Measured Performance:**
+- Vector Seed Search: part of ~58.1ms total
+- Recursive Traversal: included in total
+- Semantic Filtering: included in total
+- Total: ~58.1ms measured in current benchmark
 
 **Factors:**
 - Max depth (default: 3)
@@ -274,6 +289,29 @@ This tool compares strategies using a synthetic dataset and measures **Recall@K*
 | 10k-100k entities | SQLite | bge-m3 | Consider periodic cleanup |
 | 100k-1M entities | RocksDB | bge-m3 | Enable defragmentation |
 | > 1M entities | RocksDB | bge-small | Consider sharding |
+
+## Comparison with other solutions
+
+A common question when evaluating this project is: *"Why not just combine existing tools like SQLite + Chroma + NetworkX?"*
+
+The short answer: **CozoDB is a single engine** that natively combines relational, graph, vector, and full-text search. That means one query language, one index, one file, and no sync lag between separate systems. The "separate stack" approach usually works, but it multiplies operational complexity, ETL code, and failure surfaces.
+
+Measured values for CozoDB Memory come from `npm run benchmark` and `npm run eval` on the same hardware/config. Values for Chroma, Qdrant, and Mem0 should be replaced only with cited external/public benchmarks.
+
+| Test | Cozo Memory | Chroma | Qdrant | Mem0 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Recall@10** | 0.850 (Hybrid Search), 1.000 (Graph-RAG) | [external/public] | [external/public] | [external/public] |
+| **Query-Latenz** | ~56 ms Hybrid Search, ~60 ms Graph-RAG, ~62 ms Graph-Walking | [external/public] | [external/public] | [external/public] |
+| **Speicherverbrauch** | ~1504 MB RSS, ~217 MB Heap | [external/public] | [external/public] | [external/public] |
+| **nDCG@10** | 0.548 (Hybrid Search), 0.814 (Graph-RAG), 0.584 (Graph-Walking) | [external/public] | [external/public] | [external/public] |
+| **Agent-Task-Success** | not measured in current benchmark suite | [external/public] | [external/public] | [external/public] |
+
+Notes:
+- Cozo Memory numbers above were generated with `src/benchmark.ts` on Windows / Node.js 20 / CPU-only / Xenova/bge-m3 / SQLite.
+- Reranking is currently disabled in the default benchmark because the bundled reranker model path is incompatible with the installed Transformers.js pipeline set; rerank metrics should be added once that integration is fixed.
+- Do not insert internal estimates for other systems; use only vendor docs, peer-reviewed benchmarks, or reproducible public reports.
+
+Run `npm run benchmark -- --format markdown --no-rerank` to refresh these numbers.
 
 ## See Also
 
