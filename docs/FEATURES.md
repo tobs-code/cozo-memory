@@ -1617,6 +1617,116 @@ For complete MCP tool documentation, see [README.md](README.md#mcp-tools).
 
 ---
 
+---
+
+## Agent Convenience Actions (v2.14) ✅ INTEGRATED
+
+These high-level actions reduce round-trips for LLM agents by aggregating multiple low-level operations.
+
+### Entity Management
+
+**`list_entities` (query_memory)** — Browse memory without searching.
+- Parameters: `type?`, `types?: string[]`, `name_contains?`, `tags?: string[]` (entity must have ALL tags), `sort_by` (name|created_at|updated_at, default created_at), `sort_order` (asc|desc, default desc), `limit?` (default 20, max 1000), `offset?` (default 0)
+- Response: `{ entities: [{id, name, type, metadata, tags, created_at, observation_count, relation_count}], total, offset, limit }`
+
+**`get_entity_detail` (query_memory)** — Full entity info in one call.
+- Parameters: `entity_id` (required), `include_observations?` (default true), `include_relations?` (default true), `include_community?` (default false), `include_timeline?` (default false)
+- Response: `{ entity, observations[], relations: {outgoing[], incoming[]}, community?, timeline? }`
+
+**`stats` (manage_system)** — Aggregate dashboard.
+- No parameters required.
+- Response: `{ overview: {total_entities, total_observations, total_relations}, by_type[], timeline: {oldest_entity, newest_entity, entities_last_24h, entities_last_7d}, activity: {...} }`
+
+### Observation Management
+
+**`update_observation` (mutate_memory)** — Edit observation in place (validity-preserving).
+- Parameters: `observation_id` (required), `text?`, `metadata?`, `merge_metadata?` (default false)
+- Re-embeds automatically if text changed. Preserves history.
+
+**`batch_delete` (mutate_memory)** — Bulk delete with dry-run support.
+- Parameters: `entity_ids?: string[]` OR `filter?: {type?, name_contains?, created_before?, created_after?, metadata?, tags?}`, `dry_run?` (default false)
+- Response: `{ status, deleted_count, deleted_entities[], deleted_observations, deleted_relations, errors? }`
+
+### Tag Management
+
+**`manage_tags` (mutate_memory)** — Lightweight tags stored in `metadata.tags`.
+- Operations: `add`, `remove`, `set`, `list`, `search`
+- Parameters: `operation`, `entity_id?` (required for add/remove/set), `tags?: string[]`, `search_tag?` (for search)
+
+### Session Management
+
+**`get_session_context` (query_memory)** — Retrieve session observations.
+- Parameters: `session_id?` (defaults to most recent active session), `include_observations?`, `include_entities?`, `include_timeline?`, `limit?` (default 50)
+
+**`list_sessions` (query_memory)** — List sessions with metadata.
+- Parameters: `active_only?` (default false), `limit?` (default 50)
+- Response: `{ sessions: [{session_id, last_active, status, metadata, observation_count}], total }`
+
+### Batch Operations
+
+**`batch` (mutate_memory)** — Execute sequence of mutations.
+- Parameters: `operations: [{action, params}]`, `transactional?` (default true), `continue_on_error?` (default false)
+- Supported actions: `create_entity`, `add_observation`, `create_relation`, `delete_entity`, `update_observation`
+
+### User Profile
+
+**`edit_user_profile`** (separate MCP tool) — Direct management of `global_user_profile`.
+- Parameters: `name?`, `type?`, `metadata?`, `observations?: [{text, metadata?}]`, `clear_observations?`
+- User profile observations get 50% score boost in all searches.
+
+---
+
+## Explainable Retrieval Paths (v2.14) ✅ INTEGRATED
+
+**Status:** Now fully integrated into the MCP server (was previously documented but not exposed).
+
+**Action:** `query_memory` → `explain_results`
+
+**What it does:** Generates detailed reasoning paths and explanations for any search results returned by other actions (hybrid search, graph_rag, multi_hop, dynamic_fusion).
+
+**Parameters:**
+- `query` (required): The original search query
+- `results` (required): Array of search result objects to explain
+- `search_type` (default "hybrid"): `hybrid | graph_rag | multi_hop | dynamic_fusion`
+- `include_path_viz` (default false): Include graph path visualization
+- `include_reasoning` (default true): Include step-by-step reasoning
+- `include_score_breakdown` (default true): Include score formula and components
+
+**Usage example:**
+```json
+{
+  "action": "explain_results",
+  "query": "TypeScript programming",
+  "search_type": "graph_rag",
+  "results": [...]
+}
+```
+
+**Response includes:**
+- `summary` — One-line explanation of why the result matched
+- `reasoning` — Detailed natural-language reasoning
+- `steps[]` — Step-by-step breakdown of the retrieval process
+- `pathVisualization` — Graph path like "Query --[semantic:0.85]--> TypeScript --[expert_in]--> Alice"
+- `scoreBreakdown` — Score formula, component values, and weights
+- `confidence` — Overall confidence score (0-1)
+- `sources[]` — Contributing retrieval paths
+
+---
+
+## Still To Be Integrated (Known Dead Code)
+
+The following modules exist in `src/` but are **NOT YET** exposed via MCP tools. They are scheduled for integration in upcoming versions:
+
+| Module | Target Action | Priority |
+|--------|---------------|----------|
+| `src/multi-hop-vector-pivot.ts` | `query_memory.multi_hop_search` | Medium |
+| `src/adaptive-query-fusion.ts` | Integrate into `dynamic_fusion` | High |
+| `src/query-pipeline.ts` | `query_memory.execute_pipeline` | Low |
+| `src/temporal-embedding-service.ts` | Temporal GNN embeddings | Low (academic) |
+| `src/temporal-pattern-detection.ts` | Replace inline `detect_temporal_patterns` | Medium |
+
+**See `docs-abgleich-ergebnis.md` for the full audit results.**
+
 ## Additional Resources
 
 - [CHANGELOG.md](CHANGELOG.md) - Version history and release notes
