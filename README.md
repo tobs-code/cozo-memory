@@ -473,7 +473,7 @@ Built with:
 
 Research foundations:
 - GraphRAG-R1 (Yu et al., WWW 2026) - conceptual inspiration for adaptive retrieval
-- HopRAG (ACL 2025)
-- T-GRAG (Li et al., 2025)
+- HopRAG (ACL 2025) - conceptual inspiration for multi-hop reasoning
+- T-GRAG (Li et al., 2025) - conceptual inspiration for temporal conflict resolution
 - FEEG Framework (Samuel et al., 2026) - conceptual inspiration for query intent classification
-- Allan-Poe (arXiv:2511.00855)
+- Allan-Poe (arXiv:2511.00855) - conceptual inspiration for dynamic fusion
