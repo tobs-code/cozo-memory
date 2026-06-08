@@ -3912,7 +3912,11 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
         `?[name, type, metadata, ts] := *entity{id: $id, name, type, metadata, created_at, @ "NOW"}, ts = to_int(created_at)`,
         { id: args.entity_id },
       );
-      if (entRes.rows.length === 0) return { error: "Entity not found" };
+      if (entRes.rows.length === 0) return {
+        error: "Entity not found",
+        entity_id: args.entity_id,
+        hint: "Make sure you are passing an entity ID (not an observation ID or relation ID). Use 'list_entities' or 'search' to find valid entity IDs.",
+      };
 
       const e = entRes.rows[0];
       const metadata = (e[2] || {}) as Record<string, any>;
@@ -4093,13 +4097,14 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
 
       let deleted_observations = 0;
       let deleted_relations = 0;
-      const deleted_entities: string[] = [];
-      const errors: Array<{ id: string; error: string }> = [];
+      const deleted: string[] = [];
+      const not_found: string[] = [];
+      const errors: string[] = [];
 
       for (const id of targetIds) {
         const exists = await this.db.run('?[name] := *entity{id: $id, name, @ "NOW"}', { id });
         if (exists.rows.length === 0) {
-          errors.push({ id, error: "Entity not found" });
+          not_found.push(id);
           continue;
         }
 
@@ -4109,26 +4114,28 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
           const relInC = await this.db.run('?[count(f)] := *relationship{from_id: f, to_id: $id, @ "NOW"}', { id });
           deleted_observations += Number(obsC.rows[0]?.[0] || 0);
           deleted_relations += Number(relOutC.rows[0]?.[0] || 0) + Number(relInC.rows[0]?.[0] || 0);
-          deleted_entities.push(id);
+          deleted.push(id);
         } else {
           const res: any = await this.deleteEntity({ entity_id: id });
           if (res.error) {
-            errors.push({ id, error: res.message || res.error });
+            errors.push(`${id}: ${res.message || res.error}`);
             continue;
           }
           deleted_observations += Number(res.deleted?.observations || 0);
           deleted_relations += Number(res.deleted?.outgoing_relations || 0) + Number(res.deleted?.incoming_relations || 0);
-          deleted_entities.push(id);
+          deleted.push(id);
         }
       }
 
       return {
         status: dryRun ? "dry_run" : "deleted",
-        deleted_count: deleted_entities.length,
-        deleted_entities,
+        deleted_count: deleted.length,
+        deleted,
+        not_found,
+        errors,
+        deleted_entities: deleted,
         deleted_observations,
         deleted_relations,
-        ...(errors.length ? { errors } : {}),
       };
     } catch (error: any) {
       return { error: "Batch delete failed", message: error.message };
@@ -4657,6 +4664,18 @@ Format MUST start with "ExecutiveSummary: " followed by the consolidated content
       transactional: z.boolean().optional().describe("For batch: all-or-nothing (default true)"),
     });
 
+    // Normalizes common parameter aliases that LLMs frequently send so they
+    // pass discriminatedUnion validation (which doesn't support z.preprocess).
+    const normalizeAliases = (args: any): any => {
+      if (!args || typeof args !== "object") return args;
+      const a = { ...args };
+      if (a.action === "create_entity" && a.entity_type && !a.type) a.type = a.entity_type;
+      if (a.action === "update_entity" && a.entity_id && !a.id) a.id = a.entity_id;
+      if (a.action === "stop_session" && a.session_id && !a.id) a.id = a.session_id;
+      if (a.action === "stop_task" && a.task_id && !a.id) a.id = a.task_id;
+      return a;
+    };
+
     this.mcp.addTool({
       name: "mutate_memory",
       description: `Write access to memory. Select operation via 'action'.
@@ -4674,8 +4693,11 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
         await this.initPromise;
         console.error(`[mutate_memory] Call with:`, JSON.stringify(args, null, 2));
 
+        // Normalize common parameter aliases that LLMs frequently send before validation.
+        const normalizedArgs = normalizeAliases(args);
+
         // Zod discriminatedUnion is strict. We try to parse it more flexibly.
-        const parsed = MutateMemorySchema.safeParse(args);
+        const parsed = MutateMemorySchema.safeParse(normalizedArgs);
         if (!parsed.success) {
           console.error(`[mutate_memory] Validation error:`, JSON.stringify(parsed.error.issues, null, 2));
 
