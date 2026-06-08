@@ -6,9 +6,9 @@
 [![MCP Badge](https://lobehub.com/badge/mcp/tobs-code-cozo-memory)](https://lobehub.com/mcp/tobs-code-cozo-memory)
 
 > **Why Cozo Memory?**  
-> LLMs have short-term memory limits. Standard RAG retrieves documents but can't connect facts across time. Cozo Memory gives your AI agent **persistent, structured memory** – it remembers past conversations, infers relationships, detects contradictions, and explores its knowledge graph – all fully offline on your machine.
+> LLMs have short-term memory limits. Standard RAG retrieves documents but can't connect facts across time. Cozo Memory gives your AI agent **persistent, structured memory** – it remembers past conversations, infers relationships, detects contradictions, and explores its knowledge graph – fully on your machine, with **optional local LLM integration via Ollama** for intelligent actions (cleanup, reflection, summarization, agentic routing).
 
-**Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – all in a single binary, no cloud, no Docker.**
+**Local-first memory for Claude & AI agents with hybrid search, Graph-RAG, and time-travel – runs entirely on your machine. Optional [Ollama](https://ollama.ai) integration enables LLM-powered actions (cleanup, reflect, summarize, agentic retrieval).**
 
 ## Table of Contents
 
@@ -55,7 +55,7 @@ Now add the server to your MCP client (e.g. Claude Desktop) – see [Integration
 
 ⏳ **Temporal Conflict Resolution** - Automatic detection and resolution of contradictory observations with semantic analysis and audit preservation
 
-🏠 **100% Local** - Embeddings via ONNX/Transformers; no external services, no cloud, complete data ownership
+🏠 **100% Local** - Embeddings via ONNX/Transformers; data stays on your machine. Some advanced features (cleanup, reflect, summarize, agentic search) require an optional [Ollama](https://ollama.ai) service for local LLM inference — but the core search, CRUD, and graph operations work **without any LLM**.
 
 🧠 **Multi-Hop Reasoning** - Logic-aware graph traversal with vector pivots for deep relational reasoning
 
@@ -95,6 +95,31 @@ The core advantage is **Intelligence and Traceability**: By combining an **Agent
   - Runtime memory: ~1.1 GB
   - ⚡ **Too heavy?** Use `EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2` – only **~400 MB RAM** needed (see [Embedding Model Options](#embedding-model-options))
 - CozoDB native dependency is installed via `cozo-node`
+
+### Optional: Ollama for LLM-powered actions
+
+Some advanced actions use a local LLM via [Ollama](https://ollama.ai) for intelligent
+processing. **The core server works without Ollama** (CRUD, search, graph operations),
+but the following actions require it:
+
+| Action | Purpose |
+|--------|---------|
+| `cleanup` | LLM-backed observation consolidation |
+| `reflect` | Generate insights, detect contradictions |
+| `summarize_communities` | LLM-generated community summaries |
+| `compact` | Session / entity compaction with LLM summarization |
+| `agentic_search` | Query intent classification for auto-routing |
+
+**Setup (if you need these features):**
+```bash
+# 1. Install Ollama from https://ollama.ai
+# 2. Pull a model (e.g. small + fast for dev):
+ollama pull demyagent-4b-i1:Q6_K
+# 3. Ollama runs automatically on http://localhost:11434
+```
+
+If Ollama is not running, the affected actions gracefully fall back to non-LLM behavior
+(where possible) or return a clear error message.
 
 ### Via npm (Easiest)
 
@@ -358,10 +383,12 @@ The interface is reduced to **5 consolidated tools**:
 - This is normal and only happens once
 - Subsequent starts are fast (< 2 seconds)
 
-**Cleanup/Reflect Requires Ollama**
-- If using `cleanup` or `reflect` actions, an Ollama service must be running locally
+**LLM-powered actions require Ollama**
+- The following actions use a local LLM for intelligent processing: `cleanup`, `reflect`, `summarize_communities`, `compact`, `agentic_search`
 - Install Ollama from https://ollama.ai
 - Pull the desired model: `ollama pull demyagent-4b-i1:Q6_K` (or your preferred model)
+- Without Ollama, these actions fall back to non-LLM behavior or return a clear error
+- **Core features (CRUD, search, graph, infer) work without any LLM**
 
 **Windows-Specific**
 - Embeddings are processed on CPU for maximum compatibility
@@ -406,30 +433,6 @@ npm run bridge       # Build + Start of API Bridge
 npm run benchmark    # Runs performance tests
 npm run eval         # Runs evaluation suite
 ```
-
-## Roadmap
-
-### Near-Term (v1.x)
-
-- **GPU Acceleration** - CUDA support for embedding generation (10-50x faster)
-- **Streaming Ingestion** - Real-time data ingestion from logs, APIs, webhooks
-- **Advanced Chunking** - Semantic chunking for `ingest_file` (paragraph-aware splitting)
-- **Query Optimization** - Automatic query plan optimization for complex graph traversals
-- **Additional Export Formats** - Notion, Roam Research, Logseq compatibility
-
-### Mid-Term (v2.x)
-
-- **Multi-Modal Embeddings** - Support for images, audio, code
-- **Distributed Memory** - Sharding and replication for large-scale deployments
-- **Advanced Inference** - Neural-symbolic reasoning, causal inference
-- **Real-Time Sync** - WebSocket-based real-time updates
-- **Web UI** - Browser-based management interface
-
-### Long-Term (v3.x)
-
-- **Federated Learning** - Privacy-preserving collaborative learning
-- **Quantum-Inspired Algorithms** - Advanced graph algorithms
-- **Multi-Agent Coordination** - Shared memory across multiple agents
 
 ## Contributing
 

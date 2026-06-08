@@ -11,7 +11,7 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 | `mutate_memory` | Write operations | create_entity, update_entity, delete_entity, add_observation, create_relation, start_session, stop_session, start_task, stop_task, run_transaction, add_inference_rule, ingest_file, invalidate_observation, invalidate_relation, enrich_observation, record_memory_access, prune_weak_memories, detect_conflicts, resolve_conflicts |
 | `query_memory` | Read operations | search, advancedSearch, context, entity_details, history, graph_rag, graph_walking, agentic_search, dynamic_fusion, adaptive_retrieval, get_zettelkasten_stats, get_activation_stats, get_salience_stats, suggest_connections, spreading_activation, qafd_search, hierarchical_memory_query |
 | `analyze_graph` | Graph analysis | explore, communities, pagerank, betweenness, hits, connected_components, shortest_path, bridge_discovery, semantic_walk, infer_relations, get_relation_evolution, hnsw_clusters, discover_logical_edges, materialize_logical_edges, detect_temporal_patterns |
-| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compress_memory_levels, analyze_memory_distribution, compact |
+| `manage_system` | Maintenance | health, metrics, export_memory, import_memory, snapshot_create, snapshot_list, snapshot_diff, cleanup, defrag, reflect, summarize_communities, clear_memory, compress_memory_levels, analyze_memory_distribution, compact, list_inference_rules, delete_inference_rule |
 | `edit_user_profile` | User preferences | Edit global user profile with preferences and work style |
 
 **For detailed documentation, examples, and best practices, see `docs/USAGE-GUIDE.md`**
@@ -31,7 +31,7 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 - `run_transaction` - Atomic multi-operation execution
 - `add_inference_rule` - Custom Datalog rules (must return 5 columns: from_id, to_id, relation_type, confidence, reason)
 - `ingest_file` - Bulk import (Markdown/JSON/PDF)
-- `start_session`, `stop_session`, `start_task`, `stop_task` - Context tracking (stop operations use `id` parameter)
+- `start_session`, `stop_session`, `start_task`, `stop_task` - Context tracking (`stop_session`/`stop_task` use `id`, not `session_id`/`task_id`)
 - `detect_conflicts`, `resolve_conflicts` - Conflict detection and resolution
 - `enrich_observation`, `record_memory_access`, `prune_weak_memories` - Memory management
 
@@ -135,6 +135,10 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 - `analyze_memory_distribution` - Memory level analysis (entity_id required)
 - `clear_memory` - Reset entire database (confirm=true required)
 
+**Inference rule management:**
+- `list_inference_rules` - List all custom Datalog inference rules (no params)
+- `delete_inference_rule` - Delete a custom inference rule (rule_id required)
+
 **Important:** Use `confirm=false` for dry-run before cleanup/defrag. `clear_memory` requires `confirm=true`.
 
 **Note:** For statistics (get_salience_stats, get_activation_stats, get_zettelkasten_stats), use `query_memory` tool instead.
@@ -170,7 +174,7 @@ Direct management of the global user profile ('global_user_profile').
 
 Understanding parameter naming helps avoid confusion:
 
-- **entity_id** - Entity references (create_relation, add_observation, detect_conflicts, etc.)
+- **entity_id** - Entity references (create_relation, add_observation, detect_conflicts, manage_tags, etc.)
 - **id** - Update/stop operations (stop_session, stop_task, update_entity)
 - **observation_id** - Observation operations (invalidate_observation, enrich_observation, record_memory_access)
 - **from_id / to_id** - Relationship operations (create_relation, invalidate_relation)
@@ -481,6 +485,34 @@ false — only honored when not transactional).
 ```
 
 Response: `{ status: "completed" | "partial" | "failed", results: [{ index, action, status, result?, error? }], summary: { total, succeeded, failed } }`
+
+### `manage_system` → `list_inference_rules`
+
+List all custom Datalog inference rules stored in CozoDB. No parameters.
+
+```json
+{ "action": "list_inference_rules" }
+```
+
+Response: `{ count, rules: [{ id, name, datalog, created_at }] }`
+
+Use this to inspect which rules are currently active and identify noisy or
+outdated ones (e.g. cross-product rules that flood `infer_relations` with
+irrelevant edges).
+
+### `manage_system` → `delete_inference_rule`
+
+Delete a custom Datalog inference rule by its ID. Useful for cleaning up
+rules that produce unwanted noise (e.g. a `same_type` rule that links every
+entity of the same type to every other).
+
+Parameters: `rule_id` (required — get the ID from `list_inference_rules`).
+
+```json
+{ "action": "delete_inference_rule", "rule_id": "4d872878-1742-49f2-9ff3-52d2d107c424" }
+```
+
+Response: `{ status: "deleted", rule_id, name }` — or `{ error: "Inference rule with ID '...' not found" }`.
 
 ---
 

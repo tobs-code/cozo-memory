@@ -18,6 +18,7 @@ import { EmotionalSalienceService } from "./emotional-salience";
 import { ProactiveSuggestionsService } from "./proactive-suggestions";
 import { SpreadingActivationService } from "./spreading-activation";
 import { TemporalConflictResolutionService } from "./temporal-conflict-resolution";
+import { ExplainableRetrievalService } from "./explainable-retrieval";
 
 export const DB_PATH = path.resolve(__dirname, "..", "memory_db.cozo");
 const DB_ENGINE = process.env.DB_ENGINE || "sqlite"; // "sqlite" or "rocksdb"
@@ -45,6 +46,7 @@ export class MemoryServer {
   private logicalEdgesService: any = null;
   private hierarchicalMemoryService: any = null;
   private queryAwareTraversal: any = null;
+  private explainableService: ExplainableRetrievalService | null = null;
 
   // Metrics tracking
   private metrics = {
@@ -265,6 +267,12 @@ export class MemoryServer {
     return this.queryAwareTraversal;
   }
 
+  public getExplainableService(): ExplainableRetrievalService {
+    if (!this.explainableService) {
+      this.explainableService = new ExplainableRetrievalService(this.db, this.embeddingService);
+    }
+    return this.explainableService;
+  }
   public async janitorCleanup(args: {
     confirm: boolean;
     older_than_days?: number;
@@ -5030,7 +5038,7 @@ Note: Inference rules must return exactly 5 columns: [from_id, to_id, relation_t
 
     const QueryMemoryParameters = z.object({
       action: z
-        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query", "list_entities", "get_entity_detail", "get_session_context", "list_sessions"])
+        .enum(["search", "advancedSearch", "context", "entity_details", "history", "graph_rag", "graph_walking", "agentic_search", "dynamic_fusion", "adaptive_retrieval", "get_zettelkasten_stats", "get_activation_stats", "get_salience_stats", "suggest_connections", "spreading_activation", "qafd_search", "hierarchical_memory_query", "explain_results", "list_entities", "get_entity_detail", "get_session_context", "list_sessions"])
         .describe("Retrieval strategy - use 'search' for simple queries, 'adaptive_retrieval' for auto-optimization, 'context' for exploration"),
       query: z.string().optional().describe("Search query text (required for most actions)"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 10)"),
@@ -5756,6 +5764,31 @@ Note: User profile observations (entity_id='global_user_profile') are automatica
           });
         }
 
+        if (input.action === "explain_results") {
+          try {
+            console.log('[query_memory] Explaining', input.results.length, 'results for query:', input.query);
+            const explained = await this.getExplainableService().explainResults(
+              input.results,
+              input.query,
+              input.search_type || 'hybrid',
+              {
+                includePathVisualization: input.include_path_viz,
+                includeReasoningSteps: input.include_reasoning,
+                includeScoreBreakdown: input.include_score_breakdown
+              }
+            );
+            console.log('[query_memory] Explanation completed for', explained.length, 'results');
+            return JSON.stringify({
+              query: input.query,
+              search_type: input.search_type,
+              explained_results: explained
+            });
+          } catch (error: any) {
+            console.error('[query_memory] Error explaining results:', error);
+            return JSON.stringify({ error: "Failed to explain results", details: error.message });
+          }
+        }
+
         if (input.action === "list_entities") {
           return JSON.stringify(await this.listEntities({
             type: input.type,
@@ -6331,11 +6364,16 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
         action: z.literal("analyze_memory_distribution"),
         entity_id: z.string().describe("Entity ID to analyze memory distribution for"),
       }),
+      z.object({ action: z.literal("list_inference_rules") }),
+      z.object({
+        action: z.literal("delete_inference_rule"),
+        rule_id: z.string().describe("ID of the inference rule to delete"),
+      }),
     ]);
 
     const ManageSystemParameters = z.object({
       action: z
-        .enum(["health", "metrics", "stats", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact", "compress_memory_levels", "analyze_memory_distribution"])
+        .enum(["health", "metrics", "stats", "export_memory", "import_memory", "snapshot_create", "snapshot_list", "snapshot_diff", "cleanup", "defrag", "reflect", "clear_memory", "summarize_communities", "compact", "compress_memory_levels", "analyze_memory_distribution", "list_inference_rules", "delete_inference_rule"])
         .describe("Action (determines which fields are required)"),
       format: z.enum(["json", "markdown", "obsidian"]).optional().describe("Export format (for export_memory)"),
       includeMetadata: z.boolean().optional().describe("Include metadata (for export_memory)"),
@@ -6361,6 +6399,7 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
       min_community_size: z.number().optional().describe("Optional for summarize_communities"),
       mode: z.enum(["summary", "discovery"]).optional().describe("Optional for reflect"),
       level: z.number().optional().describe("Required for compress_memory_levels (0-3: L0_RAW, L1_SESSION, L2_WEEKLY, L3_MONTHLY)"),
+      rule_id: z.string().optional().describe("Required for delete_inference_rule"),
     });
 
     this.mcp.addTool({
@@ -6371,7 +6410,7 @@ Monitoring: health (status check), metrics (detailed stats)
 Data portability: export_memory (JSON/Markdown/Obsidian), import_memory (Mem0/MemGPT/Cozo)
 Backups: snapshot_create, snapshot_list, snapshot_diff
 Optimization: cleanup (LLM consolidation), defrag (merge duplicates), reflect (find contradictions)
-Advanced: summarize_communities, compress_memory_levels, analyze_memory_distribution, compact
+Advanced: summarize_communities, compress_memory_levels, analyze_memory_distribution, compact, list_inference_rules, delete_inference_rule
 
 Important: Use confirm=false for dry-run before cleanup/defrag. clear_memory requires confirm=true.
 
@@ -6733,6 +6772,51 @@ For detailed action descriptions and parameters, see docs/USAGE-GUIDE.md.`,
             });
           } catch (error: any) {
             return JSON.stringify({ error: error.message || "Error analyzing memory distribution" });
+          }
+        }
+
+        if (input.action === "list_inference_rules") {
+          try {
+            const res = await this.db.run('?[id, name, datalog, created_at] := *inference_rule{id, name, datalog, created_at}');
+            const rules = res.rows.map((r: any) => ({
+              id: r[0],
+              name: r[1],
+              datalog: r[2],
+              created_at: r[3] ? new Date(Number(r[3])).toISOString() : null,
+            }));
+            return JSON.stringify({ count: rules.length, rules });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error listing inference rules" });
+          }
+        }
+
+        if (input.action === "delete_inference_rule") {
+          try {
+            if (!input.rule_id) {
+              return JSON.stringify({ error: "rule_id is required for delete_inference_rule" });
+            }
+
+            // Check if rule exists
+            const existing = await this.db.run('?[id, name] := *inference_rule{id, name}, id = $id', { id: input.rule_id });
+            if (existing.rows.length === 0) {
+              return JSON.stringify({ error: `Inference rule with ID '${input.rule_id}' not found` });
+            }
+
+            const ruleName = existing.rows[0][1];
+
+            // Delete the rule
+            await this.db.run(
+              '{ ?[id, name, datalog, created_at] := *inference_rule{id, name, datalog, created_at}, id = $id :rm inference_rule {id, name, datalog, created_at} }',
+              { id: input.rule_id }
+            );
+
+            return JSON.stringify({
+              status: "deleted",
+              rule_id: input.rule_id,
+              name: ruleName,
+            });
+          } catch (error: any) {
+            return JSON.stringify({ error: error.message || "Error deleting inference rule" });
           }
         }
 
