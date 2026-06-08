@@ -31,7 +31,7 @@ The interface is consolidated into **5 main tools**. The concrete operation is a
 - `run_transaction` - Atomic multi-operation execution
 - `add_inference_rule` - Custom Datalog rules (must return 5 columns: from_id, to_id, relation_type, confidence, reason)
 - `ingest_file` - Bulk import (Markdown/JSON/PDF)
-- `start_session`, `stop_session`, `start_task`, `stop_task` - Context tracking (`stop_session`/`stop_task` use `id`, not `session_id`/`task_id`)
+- `start_session`, `stop_session`, `start_task`, `stop_task` - Context tracking (`stop_session`/`stop_task` use `id`; the aliases `session_id`/`task_id` are also accepted)
 - `detect_conflicts`, `resolve_conflicts` - Conflict detection and resolution
 - `enrich_observation`, `record_memory_access`, `prune_weak_memories` - Memory management
 
@@ -192,6 +192,17 @@ Understanding parameter naming helps avoid confusion:
 // Update operations use id
 {"action": "update_entity", "id": "abc-123", "name": "New Name"}
 ```
+
+**Accepted aliases:** To reduce friction, a few common alias names are normalized
+to their canonical form before validation (only applied when the canonical field
+is absent, so an explicit canonical value always wins):
+
+| Action | Alias | Canonical |
+| --- | --- | --- |
+| `create_entity` | `entity_type` | `type` |
+| `update_entity` | `entity_id` | `id` |
+| `stop_session` | `session_id` | `id` |
+| `stop_task` | `task_id` | `id` |
 
 ---
 
@@ -394,6 +405,10 @@ Parameters: `entity_id` (required), `include_observations?` (default true),
 
 Response: `{ entity, observations[], relations: { outgoing[], incoming[] }, community?, timeline? }`
 
+If the entity does not exist, returns `{ error: "Entity not found", entity_id, hint }`
+(the `hint` reminds you to pass an entity ID — not an observation/relation ID — and
+to use `list_entities`/`search` to find valid IDs).
+
 ### `query_memory` → `get_session_context` / `list_sessions`
 
 Inspect what happened in a session. `get_session_context` defaults to the most
@@ -448,7 +463,11 @@ when true, only reports what would be deleted).
 { "action": "batch_delete", "filter": { "type": "person", "tags": ["test"] }, "dry_run": true }
 ```
 
-Response: `{ status: "deleted" | "dry_run", deleted_count, deleted_entities[], deleted_observations, deleted_relations, errors? }`
+Response: `{ status: "deleted" | "dry_run", deleted_count, deleted: string[], not_found: string[], errors: string[], deleted_entities[], deleted_observations, deleted_relations }`
+
+IDs that don't exist are returned in `not_found` (a warning, not a failure); only
+real failures (e.g. DB errors) appear in `errors`. `deleted_entities` is kept as
+an alias of `deleted` for backward compatibility.
 
 ### `mutate_memory` → `manage_tags`
 
