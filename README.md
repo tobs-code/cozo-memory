@@ -53,7 +53,7 @@ Now add the server to your MCP client (e.g. Claude Desktop) – see [Integration
 
 ⏱️ **Time-Travel Queries** - Version all changes via CozoDB Validity; query any point in history with full audit trails
 
-🎯 **GraphRAG-R1 Adaptive Retrieval** - Intelligent system with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring that learns from usage
+🎯 **GraphRAG-R1-Inspired Adaptive Retrieval** - Intelligent system with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring, conceptually inspired by GraphRAG-R1 (Yu et al., WWW 2026) and adapted for CozoDB, that learns from usage
 
 ⏳ **Temporal Conflict Resolution** - Automatic detection and resolution of contradictory observations with semantic analysis and audit preservation
 
@@ -472,8 +472,8 @@ Built with:
 - [FastMCP](https://github.com/jlowin/fastmcp) - MCP server framework
 
 Research foundations:
-- GraphRAG-R1 (Yu et al., WWW 2026)
+- GraphRAG-R1 (Yu et al., WWW 2026) - conceptual inspiration for adaptive retrieval
 - HopRAG (ACL 2025)
 - T-GRAG (Li et al., 2025)
-- FEEG Framework (Samuel et al., 2026)
+- FEEG Framework (Samuel et al., 2026) - conceptual inspiration for query intent classification
 - Allan-Poe (arXiv:2511.00855)

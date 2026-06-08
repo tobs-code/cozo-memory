@@ -8,7 +8,7 @@ Complete documentation for all CozoDB Memory features.
 
 - **[Hybrid Search](#hybrid-search)** - Combines semantic (HNSW), full-text (FTS), and graph signals via RRF
 - **[Agentic Retrieval](#agentic-retrieval)** - Auto-routing engine with LLM-based strategy selection
-- **[GraphRAG-R1 Adaptive Retrieval](#graphrag-r1-adaptive-retrieval)** - Intelligent retrieval with PRA and CAF scoring
+- **[GraphRAG-R1-Inspired Adaptive Retrieval](#graphrag-r1-adaptive-retrieval)** - Intelligent retrieval with PRA and CAF scoring, conceptually inspired by GraphRAG-R1 (Yu et al., WWW 2026) and adapted for CozoDB
 - **[Dynamic Fusion Framework](#dynamic-fusion-framework-v23)** - 4-path retrieval with configurable weights
 - **[Adaptive Query Fusion](#adaptive-query-fusion-v27)** - Query intent-based weight adjustment
 - **[Cross-Encoder Reranking](#cross-encoder-reranking)** - Ultra-precise result re-ranking
@@ -102,9 +102,9 @@ Auto-routing search that uses local LLM (Ollama) to analyze query intent and sel
 
 ---
 
-## GraphRAG-R1 Adaptive Retrieval
+## GraphRAG-R1-Inspired Adaptive Retrieval
 
-Intelligent retrieval system inspired by GraphRAG-R1 (Yu et al., WWW 2026):
+Intelligent retrieval system conceptually inspired by GraphRAG-R1 (Yu et al., WWW 2026) and adapted for CozoDB:
 
 **Features:**
 - **Progressive Retrieval Attenuation (PRA)**: Prevents over-retrieval
@@ -1148,7 +1148,7 @@ interface AdaptiveFusionConfig {
 ### Research Foundation
 
 - Meilisearch Adaptive RAG (2025) - Query complexity analysis
-- FEEG Framework (Samuel et al., 2026) - Finder, Evaluator, Explainer, Generator taxonomy
+- **FEEG Framework** (Samuel et al., 2026) - konzeptionelle Inspiration für die Query Intent Classification (Finder, Evaluator, Explainer, Generator taxonomy)
 - ORCAS-I Intent Classifier (Alexander et al., 2022) - Weak supervision with keywords
 - Query Intent Classification (2025) - Hybrid heuristic + LLM approaches
 

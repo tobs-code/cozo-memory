@@ -191,7 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.6.0] - 2026-02-20
 
 ### Added
-- **GraphRAG-R1 Adaptive Retrieval**: Intelligent retrieval system with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring that automatically selects optimal strategies based on query complexity and learns from historical performance
+- **GraphRAG-R1-Inspired Adaptive Retrieval**: Intelligent retrieval system conceptually inspired by GraphRAG-R1 (Yu et al., WWW 2026) and adapted for CozoDB, with Progressive Retrieval Attenuation (PRA) and Cost-Aware F1 (CAF) scoring that automatically selects optimal strategies based on query complexity and learns from historical performance
 
 ## [2.5.0] - 2026-02-15
 

@@ -9,7 +9,7 @@ import { AdaptiveGraphRetrieval, RetrievalStrategy } from './adaptive-retrieval'
 const DB_PATH = 'memory_db.cozo.db';
 
 async function testAdaptiveRetrieval() {
-  console.log('=== Testing GraphRAG-R1 Adaptive Retrieval ===\n');
+  console.log('=== Testing GraphRAG-R1-Inspired Adaptive Retrieval ===\n');
 
   const db = new CozoDb('sqlite', DB_PATH);
   const embeddingService = new EmbeddingService();

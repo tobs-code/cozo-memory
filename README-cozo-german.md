@@ -66,7 +66,7 @@ npm run start
 
 🧠 **Agentic Retrieval Layer (v2.0)** - Auto-Routing Engine, die den Query-Intent via lokalem LLM analysiert, um die optimale Suchstrategie (Vector, Graph oder Community) zu wählen.
 
-🤖 **GraphRAG-R1 Adaptive Retrieval (v2.6)** - Intelligentes Retrieval-System mit Progressive Retrieval Attenuation (PRA) und Cost-Aware F1 (CAF) Scoring, das automatisch optimale Strategien basierend auf Query-Komplexität auswählt und aus historischer Performance lernt
+🤖 **GraphRAG-R1-Inspired Adaptive Retrieval (v2.6)** - Konzeptionell inspiriert von GraphRAG-R1 (Yu et al., WWW 2026) und für CozoDB adaptiert: Intelligentes Retrieval-System mit Progressive Retrieval Attenuation (PRA) und Cost-Aware F1 (CAF) Scoring, das automatisch optimale Strategien basierend auf Query-Komplexität auswählt und aus historischer Performance lernt
 
 💡 **Proactive Memory Suggestions (v2.8)** - Automatische Entdeckung und Empfehlung relevanter Verbindungen mittels Vektor-Ähnlichkeit, Graph-Analyse, gemeinsamer Nachbarn und Inference Engine mit Konfidenz-Scoring
 
@@ -1145,7 +1145,7 @@ Single-User, Local-First: Dieses Projekt wurde entwickelt, um auf einem einzelne
 
 Das System nutzt jetzt intelligente Query-Klassifizierung, um Suchgewichte automatisch anzupassen. Dies basiert auf SOTA-Forschung 2026:
 
-- **FEEG Framework** (Samuel et al., 2026): Finder, Evaluator, Explainer, Generator
+- **FEEG Framework** (Samuel et al., 2026): konzeptionelle Inspiration für die Query Intent Classification (Finder, Evaluator, Explainer, Generator)
 - **Meilisearch Adaptive RAG** (2025): Query Complexity Analysis
 - **ORCAS-I Intent Classifier** (Alexander et al., 2022): Weak Supervision mit Keywords
 
